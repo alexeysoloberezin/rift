@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env
+*.env
+!*.env.example
+uploads/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
+
+# Ключ Google Service Account для автосинка Google Sheets — секрет, никогда
+# не коммитить (см. docker-compose.yml и backend/src/services/googleSheets.service.js)
+secrets/
+!secrets/.gitkeep

@@ -1,0 +1,15 @@
+# Контекст сборки для backend (docker-compose.yml: build.context = .).
+# Без этого файла node_modules, если он есть локально (например, установлен
+# на Windows для редактора), затирает то, что npm install ставит уже внутри
+# образа — бинарники становятся не той платформы/без прав на выполнение,
+# и "npm run build"/запуск падает с exit 126 (Permission denied).
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.venv
+.git
+.env
+.env.*
+secrets
+frontend/dist
+backend/uploads

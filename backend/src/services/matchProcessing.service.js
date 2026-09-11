@@ -1,0 +1,274 @@
+import { withTransaction } from '../config/db.js';
+import { parseDemoFile } from './demoParser.client.js';
+import { computeMatchRating, computeEloSwing } from './rating.service.js';
+
+/**
+ * Находит игрока в БД по steam_id64, а если не найден — по нику (без учёта
+ * регистра). Если и это не помогло — создаёт нового игрока "с нуля"
+ * (например, это заглянувший на замену игрок, которого не было в Excel).
+ */
+async function resolvePlayer(tx, { steamId, nickname }) {
+  if (steamId) {
+    const { rows } = await tx.query('SELECT * FROM players WHERE steam_id64 = $1', [steamId]);
+    if (rows[0]) return rows[0];
+  }
+
+  const { rows: byNick } = await tx.query('SELECT * FROM players WHERE LOWER(nickname) = LOWER($1)', [nickname]);
+  if (byNick[0]) {
+    // Если у найденного игрока ещё не проставлен steam_id — дозаполним
+    if (steamId && !byNick[0].steam_id64) {
+      await tx.query('UPDATE players SET steam_id64 = $1 WHERE id = $2', [steamId, byNick[0].id]);
+      byNick[0].steam_id64 = steamId;
+    }
+    return byNick[0];
+  }
+
+  const { rows: created } = await tx.query(
+    `INSERT INTO players (nickname, steam_id64) VALUES ($1, $2) RETURNING *`,
+    [nickname, steamId || null]
+  );
+  return created[0];
+}
+
+/**
+ * Реальный кейс: админ создал матч, не выбрав команды в форме (оба селекта
+ * пустые — team_a_id/team_b_id = NULL), и сразу загрузил демку. Раньше это
+ * приводило к тому, что ВСЕМ игрокам обеих команд ставился team_id = NULL,
+ * и на странице матча обе колонки фильтровались одинаково (NULL === NULL) —
+ * то есть в обеих показывались все 10 игроков сразу.
+ *
+ * Вместо того чтобы требовать команды заранее, при отсутствующей стороне
+ * заводим для неё "автосостав" — новую команду в этом же турнире, названную
+ * по карте матча (можно переименовать в админке команд позже), и сразу
+ * заполняем её реальным составом из демки. Так демку можно грузить и без
+ * предварительного создания команд — стороны просто возьмутся из самой игры.
+ */
+async function ensureMatchTeams(tx, match, parsed) {
+  const autoCreated = { A: false, B: false };
+  if (match.team_a_id && match.team_b_id) return { match, autoCreated };
+
+  let teamAId = match.team_a_id;
+  let teamBId = match.team_b_id;
+
+  if (!teamAId) {
+    const { rows } = await tx.query(
+      `INSERT INTO teams (tournament_id, name) VALUES ($1, $2) RETURNING id`,
+      [match.tournament_id, `Автосостав A — ${parsed.map || 'без карты'}`]
+    );
+    teamAId = rows[0].id;
+    autoCreated.A = true;
+  }
+  if (!teamBId) {
+    const { rows } = await tx.query(
+      `INSERT INTO teams (tournament_id, name) VALUES ($1, $2) RETURNING id`,
+      [match.tournament_id, `Автосостав B — ${parsed.map || 'без карты'}`]
+    );
+    teamBId = rows[0].id;
+    autoCreated.B = true;
+  }
+
+  await tx.query('UPDATE matches SET team_a_id = $1, team_b_id = $2 WHERE id = $3', [teamAId, teamBId, match.id]);
+  return { match: { ...match, team_a_id: teamAId, team_b_id: teamBId }, autoCreated };
+}
+
+/**
+ * Полный пайплайн обработки загруженной демки:
+ *  1. Отправить файл в demo-parser сервис.
+ *  2. Сматчить игроков демки с игроками БД (или создать новых).
+ *  3. Посчитать match rating для каждого игрока.
+ *  4. Посчитать ELO swing по итогу матча и применить его к players.rating.
+ *  5. Сохранить всё в match_player_stats / player_rating_history и обновить матч.
+ *
+ * @param {string} demoId
+ * @param {string} matchId
+ * @param {string} filePath — путь к сохранённому .dem файлу на диске
+ */
+export async function processDemo(demoId, matchId, filePath) {
+  const parsed = await parseDemoFile(filePath);
+
+  await withTransaction(async (tx) => {
+    const { rows: matchRows } = await tx.query('SELECT * FROM matches WHERE id = $1', [matchId]);
+    let match = matchRows[0];
+    if (!match) throw new Error('Матч не найден');
+
+    const ensured = await ensureMatchTeams(tx, match, parsed);
+    match = ensured.match;
+    const { autoCreated } = ensured;
+
+    // Матч мог уже обрабатываться раньше (переобработка после фикса парсера,
+    // перезалив исправленной демки и т.д.). Если брать "рейтинг до матча" из
+    // ТЕКУЩЕГО players.rating — он уже содержит swing от прошлой обработки
+    // этого же матча, и каждая переобработка будет накручивать эло заново
+    // поверх уже применённого изменения. Поэтому для игроков, у которых уже
+    // есть строка match_player_stats по этому матчу, "рейтинг до матча"
+    // берём из неё (то, каким он был на момент самой первой обработки), а не
+    // из текущего players.rating.
+    const { rows: existingStatsRows } = await tx.query(
+      'SELECT player_id, elo_before FROM match_player_stats WHERE match_id = $1',
+      [matchId]
+    );
+    const existingEloBefore = new Map(existingStatsRows.map((r) => [r.player_id, Number(r.elo_before)]));
+
+    const teamAStats = [];
+    const teamBStats = [];
+
+    // Резолвим всех игроков и считаем им match rating
+    const resolved = [];
+    for (const pStat of parsed.players) {
+      const player = await resolvePlayer(tx, { steamId: pStat.steam_id, nickname: pStat.nickname });
+      const matchRating = computeMatchRating({
+        kills: pStat.kills,
+        deaths: pStat.deaths,
+        assists: pStat.assists,
+        damage: pStat.damage,
+        roundsPlayed: pStat.rounds_played,
+        kastRounds: pStat.kast_rounds,
+      });
+      const isReprocess = existingEloBefore.has(player.id);
+      const eloBefore = isReprocess ? existingEloBefore.get(player.id) : Number(player.rating);
+      resolved.push({ pStat, player, matchRating, isReprocess });
+
+      const entry = {
+        playerId: player.id,
+        elo: eloBefore,
+        matchRating,
+      };
+      if (pStat.side_majority === 'A') teamAStats.push(entry);
+      else teamBStats.push(entry);
+    }
+
+    // Реальный кейс при частых тестовых перезаливах: пока в турнире ещё нет
+    // Excel-импорта, resolvePlayer() резолвит игрока демки в НОВОГО игрока по
+    // нику; после того как ник появился в клубном реестре (импорт/ручное
+    // добавление), тот же steam_id при переобработке резолвится в ДРУГОГО,
+    // уже существующего игрока. Старая строка match_player_stats (под старым
+    // player_id) раньше просто оставалась висеть — с чужим/устаревшим ником
+    // и, что хуже, её elo_change навсегда оставался применённым к рейтингу
+    // старого player_id (никогда не откатывался). Явно откатываем и чистим
+    // такие "осиротевшие" строки для игроков, которых в этой обработке
+    // матча больше нет — тем же способом, что и полное удаление матча в
+    // DELETE /api/matches/:id.
+    const currentPlayerIds = new Set(resolved.map((r) => r.player.id));
+    const staleRows = existingStatsRows.filter((r) => !currentPlayerIds.has(r.player_id));
+    for (const s of staleRows) {
+      await tx.query(
+        'UPDATE players SET rating = $1, matches_played = GREATEST(matches_played - 1, 0), updated_at = now() WHERE id = $2',
+        [s.elo_before, s.player_id]
+      );
+      await tx.query('DELETE FROM player_rating_history WHERE player_id = $1 AND match_id = $2', [
+        s.player_id,
+        matchId,
+      ]);
+      await tx.query('DELETE FROM match_player_stats WHERE player_id = $1 AND match_id = $2', [
+        s.player_id,
+        matchId,
+      ]);
+    }
+
+    const winner =
+      parsed.team_a_score > parsed.team_b_score ? 'A' : parsed.team_a_score < parsed.team_b_score ? 'B' : 'draw';
+
+    const eloChanges = computeEloSwing({ teamA: teamAStats, teamB: teamBStats, winner });
+
+    for (const { pStat, player, matchRating, isReprocess } of resolved) {
+      const teamId = pStat.side_majority === 'A' ? match.team_a_id : match.team_b_id;
+
+      // Автосозданной команде (см. ensureMatchTeams) сразу заполняем реальный
+      // состав из демки — иначе это была бы команда без единого игрока в
+      // разделе "Команды". Для команды, которую выбрал сам админ, состав не
+      // трогаем — он куратора турнира, а не парсера демки.
+      if ((pStat.side_majority === 'A' && autoCreated.A) || (pStat.side_majority === 'B' && autoCreated.B)) {
+        await tx.query('INSERT INTO team_players (team_id, player_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
+          teamId,
+          player.id,
+        ]);
+      }
+
+      const adr = pStat.rounds_played ? Math.round((pStat.damage / pStat.rounds_played) * 100) / 100 : 0;
+      const kastPct = pStat.rounds_played ? Math.round((pStat.kast_rounds / pStat.rounds_played) * 10000) / 100 : 0;
+      const change = eloChanges.get(player.id);
+
+      await tx.query(
+        `INSERT INTO match_player_stats (
+           match_id, player_id, team_id, rounds_played, kills, deaths, assists, headshots,
+           damage, adr, kast_rounds, kast_pct, entry_kills, entry_deaths,
+           clutches_won, clutches_played, multi_kills, match_rating, elo_before, elo_after, elo_change
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         ON CONFLICT (match_id, player_id) DO UPDATE SET
+           team_id = EXCLUDED.team_id,
+           rounds_played = EXCLUDED.rounds_played, kills = EXCLUDED.kills, deaths = EXCLUDED.deaths,
+           assists = EXCLUDED.assists, headshots = EXCLUDED.headshots, damage = EXCLUDED.damage,
+           adr = EXCLUDED.adr, kast_rounds = EXCLUDED.kast_rounds, kast_pct = EXCLUDED.kast_pct,
+           entry_kills = EXCLUDED.entry_kills, entry_deaths = EXCLUDED.entry_deaths,
+           clutches_won = EXCLUDED.clutches_won, clutches_played = EXCLUDED.clutches_played,
+           multi_kills = EXCLUDED.multi_kills, match_rating = EXCLUDED.match_rating,
+           elo_before = EXCLUDED.elo_before, elo_after = EXCLUDED.elo_after, elo_change = EXCLUDED.elo_change`,
+        [
+          matchId, player.id, teamId, pStat.rounds_played, pStat.kills, pStat.deaths, pStat.assists,
+          pStat.headshots || 0, pStat.damage, adr, pStat.kast_rounds, kastPct,
+          pStat.entry_kills || 0, pStat.entry_deaths || 0, pStat.clutches_won || 0, pStat.clutches_played || 0,
+          JSON.stringify(pStat.multi_kills || {}), matchRating, change.eloBefore, change.eloAfter, change.eloChange,
+        ]
+      );
+
+      // matches_played увеличиваем только при самой первой обработке этого
+      // матча для игрока — иначе переобработка задваивала бы счётчик матчей.
+      await tx.query(
+        `UPDATE players SET rating = $1, matches_played = matches_played + $2, updated_at = now() WHERE id = $3`,
+        [change.eloAfter, isReprocess ? 0 : 1, player.id]
+      );
+
+      // DELETE + INSERT вместо голого INSERT: на (player_id, match_id) нет
+      // уникального ограничения, поэтому обычный INSERT при переобработке
+      // создавал бы дублирующую строку истории рейтинга вместо замены старой.
+      await tx.query('DELETE FROM player_rating_history WHERE player_id = $1 AND match_id = $2', [
+        player.id,
+        matchId,
+      ]);
+      await tx.query(
+        `INSERT INTO player_rating_history (player_id, match_id, elo_before, elo_after, elo_change)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [player.id, matchId, change.eloBefore, change.eloAfter, change.eloChange]
+      );
+    }
+
+    // Реальный кейс: в таблице составов показывались клубные (FACEIT)
+    // ники, а в журнале раундов (топ фраггер/вход/клатч) — другие. Причина:
+    // demo-parser — отдельный сервис без доступа к клубной БД, поэтому
+    // rounds[].top_killer/entry_kill_by/entry_death_of/clutch.player — это
+    // "сырые" имена из самой демки (текущий Steam-ник на момент записи),
+    // а не зарегистрированный в клубе ник. Здесь мы уже знаем каждого
+    // steam_id → клубного игрока (resolved), поэтому подменяем эти поля на
+    // канонический ник перед сохранением, чтобы сайт везде показывал одно и
+    // то же имя для одного и того же человека.
+    const nicknameBySteamId = new Map(resolved.map(({ pStat, player }) => [pStat.steam_id, player.nickname]));
+    const canonicalNickname = (steamId, fallback) =>
+      steamId && nicknameBySteamId.has(steamId) ? nicknameBySteamId.get(steamId) : fallback;
+
+    for (const round of parsed.rounds || []) {
+      round.top_killer = canonicalNickname(round.top_killer_steam_id, round.top_killer);
+      round.entry_kill_by = canonicalNickname(round.entry_kill_by_steam_id, round.entry_kill_by);
+      round.entry_death_of = canonicalNickname(round.entry_death_of_steam_id, round.entry_death_of);
+      if (round.clutch) {
+        round.clutch.player = canonicalNickname(round.clutch.steam_id, round.clutch.player);
+      }
+      for (const kill of round.kills || []) {
+        kill.attacker_nickname = canonicalNickname(kill.attacker_steam_id, kill.attacker_nickname);
+        kill.victim_nickname = canonicalNickname(kill.victim_steam_id, kill.victim_nickname);
+      }
+    }
+    for (const p of parsed.players || []) {
+      p.nickname = canonicalNickname(p.steam_id, p.nickname);
+    }
+
+    await tx.query(
+      `UPDATE matches SET map = $1, score_a = $2, score_b = $3, status = 'rated' WHERE id = $4`,
+      [parsed.map, parsed.team_a_score, parsed.team_b_score, matchId]
+    );
+
+    await tx.query(
+      `UPDATE demos SET status = 'parsed', parsed_at = now(), raw_stats = $1 WHERE id = $2`,
+      [JSON.stringify(parsed), demoId]
+    );
+  });
+}

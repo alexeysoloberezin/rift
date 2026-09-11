@@ -1,0 +1,299 @@
+/*
+  RIFT — дизайн-система
+  --------------------------------------------------------------------------
+  Идея: операторская/скорборд-эстетика LAN-клуба (тёмная комната, мониторы,
+  табло с составами), поверх которой — компоновка в духе FACEIT: плотные
+  карточки, строгие таблицы статистики, кружки-аватарки игроков, чёткая
+  иерархия заголовков. Красный — сигнальный цвет клуба, взят из лого клуба
+  (красный дракон на чёрно-красном градиенте) — насыщенный, но не ядерный неон.
+
+  Палитра (тёплый чёрный + красный из лого клуба):
+    --bg          #100c0d  фон страницы
+    --bg-elevated #191415  карточки/панели
+    --bg-inset    #211a1b  поля ввода, таблицы (чуть светлее карточек)
+    --line        #332728  тонкие разделители
+    --red         #d81f1f  основной акцент (цвет дракона на лого)
+    --red-strong  #ff3b30  hover/активные состояния акцента
+    --red-dim     #3a0f0c  тёмно-красный для фонов бейджей/подсветок
+    --gold        #c99a5b  единственный "второй" акцент — для положительного
+                            изменения рейтинга (чтобы не тянуть в палитру зелёный)
+    --text        #f1ebe8  основной текст (тёплый белый, не чистый #fff)
+    --text-muted  #A09597  вторичный текст
+    --text-dim    #6f6567  третичный текст/плейсхолдеры
+
+  Типографика:
+    - Заголовки/табло: Barlow Condensed — сжатый, "стадионный" шрифт для
+      крупных цифр и заголовков (турниры, счёт матча).
+    - Текст: Inter — нейтральный читаемый гротеск.
+    - Данные/статистика: JetBrains Mono — моноширинный для таблиц статистики,
+      элo, K/D — чтобы цифры выравнивались и читались как на реальном скорборде.
+*/
+
+:root {
+  --bg: #100c0d;
+  --bg-elevated: #191415;
+  --bg-inset: #211a1b;
+  --line: #332728;
+  --red: #d81f1f;
+  --red-strong: #ff3b30;
+  --red-dim: #3a0f0c;
+  --gold: #c99a5b;
+  --text: #f1ebe8;
+  --text-muted: #a09597;
+  --text-dim: #6f6567;
+
+  --font-display: 'Barlow Condensed', sans-serif;
+  --font-body: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', monospace;
+
+  --radius: 6px;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image: radial-gradient(circle at 15% 0%, rgba(216, 31, 31, 0.09), transparent 45%),
+    radial-gradient(circle at 100% 30%, rgba(216, 31, 31, 0.05), transparent 40%);
+  background-attachment: fixed;
+  min-height: 100vh;
+  /* Страховка от горизонтального скролла всей страницы, если где-то
+     останется непредусмотренный широкий элемент — таблицы/грид-строки со
+     своим переполнением сами объявляют overflow-x: auto на своём
+     контейнере (см. .table-scroll ниже), это их не отключает. */
+  overflow-x: hidden;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.container {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+@media (max-width: 560px) {
+  .container {
+    padding: 0 14px;
+  }
+}
+
+/* Общая обёртка для широких таблиц/грид-строк статистики (составы матча,
+   история игрока и т.п.) — вместо того чтобы ужимать 6-8 колонок в 320px
+   экрана (там текст наезжает друг на друга — это и есть то, что "ломается"),
+   на мобильном строка остаётся такой же ширины, как на десктопе, а сама
+   область скроллится вбок. Использование: обернуть таблицу/список строк
+   div-ом с этим классом. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-card);
+}
+
+/* -------------------- Аватар-кружки игроков (FACEIT-style списки) -------------------- */
+.avatar-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--bg-inset);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn:hover {
+  border-color: var(--red);
+  background: var(--bg-elevated);
+}
+
+.btn-primary {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--red-strong);
+  border-color: var(--red-strong);
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: var(--red-dim);
+  color: var(--red-strong);
+}
+
+.btn-danger:hover {
+  background: var(--red-dim);
+  border-color: var(--red-strong);
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--red-strong);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 14px;
+  padding: 10px 12px;
+}
+
+/* -------------------- Бейджи статуса -------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--line);
+  color: var(--text-muted);
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.badge--live {
+  color: var(--red-strong);
+  border-color: var(--red-dim);
+  background: var(--red-dim);
+}
+
+.badge--live .badge-dot {
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge--live .badge-dot {
+    animation: none;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* -------------------- Сигнатурный элемент: строка скорборда -------------------- */
+/* Тонкая красная полоса слева, разгорающаяся на hover — как индикатор на рэке. */
+.scoreboard-row {
+  position: relative;
+  display: grid;
+  align-items: center;
+  padding: 12px 16px 12px 20px;
+  border-bottom: 1px solid var(--line);
+  transition: background 0.15s ease;
+}
+
+.scoreboard-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: var(--line);
+  border-radius: 2px;
+  transition: background 0.15s ease;
+}
+
+.scoreboard-row:hover {
+  background: rgba(216, 31, 31, 0.06);
+}
+
+.scoreboard-row:hover::before {
+  background: var(--red);
+}
+
+.scoreboard-row:last-child {
+  border-bottom: none;
+}
+
+.delta-positive {
+  color: var(--gold);
+}
+
+.delta-negative {
+  color: var(--red-strong);
+}
+
+.text-muted {
+  color: var(--text-muted);
+}

@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rift
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rift_password}
+      POSTGRES_DB: rift
+    volumes:
+      - rift_pg_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432' # можно убрать наружу в проде, оставлено для локальной отладки
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rift']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  demo-parser:
+    build: ./demo-parser
+    restart: unless-stopped
+    expose:
+      - '8001'
+    volumes:
+      # read-only доступ к тем же загруженным .dem, что видит backend — нужно
+      # для diagnose.py (ручная диагностика demoparser2 прямо на реальном файле)
+      - rift_uploads:/app/uploads:ro
+
+  backend:
+    build:
+      context: . # корень репо — нужно, чтобы в образ попал db/schema.sql (см. backend/Dockerfile)
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      demo-parser:
+        condition: service_started
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgresql://rift:${POSTGRES_PASSWORD:-rift_password}@postgres:5432/rift
+      JWT_SECRET: ${JWT_SECRET:?укажите JWT_SECRET в .env}
+      JWT_EXPIRES_IN: 7d
+      DEMO_PARSER_URL: http://demo-parser:8001
+      UPLOADS_DIR: /app/backend/uploads
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}
+      RATING_K_FACTOR: ${RATING_K_FACTOR:-30}
+      # Автосинк списка игроков из живой Google-таблицы (опционально —
+      # ничего не сломается, если ключ ниже не настроен, см. sheetSync.service.js).
+      GOOGLE_SERVICE_ACCOUNT_KEY_FILE: /run/secrets/google-sheets-sa.json
+      SHEET_SYNC_INTERVAL_MS: ${SHEET_SYNC_INTERVAL_MS:-90000}
+    volumes:
+      - rift_uploads:/app/backend/uploads
+      # Папка (не отдельный файл!) — так compose не падает на старте, даже
+      # если ключа сервис-аккаунта там ещё нет. Кладите JSON-ключ сюда как
+      # secrets/google-sheets-sa.json — папка в .gitignore, в git не попадёт.
+      - ./secrets:/run/secrets:ro
+    ports:
+      - '3000:3000'
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000/api}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '8080:80'
+
+  # Reverse-proxy на 80/443 перед frontend и backend — чтобы сайт открывался
+  # по домену riftpc.ru без порта и сразу по HTTPS. Caddy сам получает и
+  # продлевает сертификат Let's Encrypt для домена из Caddyfile — никакой
+  # ручной возни с certbot.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  rift_pg_data:
+  rift_uploads:
+  caddy_data:
+  caddy_config:

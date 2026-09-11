@@ -1,0 +1,22 @@
+import jwt from 'jsonwebtoken';
+
+/**
+ * Требует валидный JWT админ-сессии в заголовке Authorization: Bearer <token>.
+ * Кладёт данные админа в req.admin.
+ */
+export function requireAdmin(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Нет токена авторизации' });
+  }
+
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    req.admin = payload;
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, error: 'Невалидный или истёкший токен' });
+  }
+}

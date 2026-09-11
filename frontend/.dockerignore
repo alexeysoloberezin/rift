@@ -1,0 +1,7 @@
+# Контекст сборки фронтенда (docker-compose.yml: build.context = ./frontend).
+# См. пояснение в корневом .dockerignore — без этого локальный node_modules
+# затирает установленный внутри образа и билд падает с exit 126.
+node_modules
+dist
+.env
+.env.*
