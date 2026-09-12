@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.routes.js';
 import tournamentsRoutes from './routes/tournaments.routes.js';
 import matchesRoutes from './routes/matches.routes.js';
 import demosRoutes from './routes/demos.routes.js';
+import serverDemosRoutes from './routes/serverDemos.routes.js';
 import playersRoutes from './routes/players.routes.js';
 import groupsRoutes from './routes/groups.routes.js';
 import bracketRoutes from './routes/bracket.routes.js';
@@ -27,6 +28,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/tournaments', tournamentsRoutes);
 app.use('/api', matchesRoutes); // /api/matches/:id, /api/tournaments/:id/matches
 app.use('/api', demosRoutes); // /api/matches/:id/demo, /api/demos/:id
+app.use('/api', serverDemosRoutes);
 app.use('/api/players', playersRoutes);
 app.use('/api', groupsRoutes); // /api/tournaments/:id/groups, /api/groups/:id
 app.use('/api', bracketRoutes); // /api/tournaments/:id/bracket, /api/bracket-slots/:id

@@ -41,6 +41,7 @@ services:
       DATABASE_URL: postgresql://rift:${POSTGRES_PASSWORD:-rift_password}@postgres:5432/rift
       JWT_SECRET: ${JWT_SECRET:?укажите JWT_SECRET в .env}
       JWT_EXPIRES_IN: 7d
+      CS2_DEMO_API_KEY: ${CS2_DEMO_API_KEY:-}
       DEMO_PARSER_URL: http://demo-parser:8001
       UPLOADS_DIR: /app/backend/uploads
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173}

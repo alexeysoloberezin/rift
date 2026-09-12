@@ -8,7 +8,6 @@ import MapBadge from '../components/MapBadge.vue';
 import PlayerAvatar from '../components/PlayerAvatar.vue';
 import FaceitLevelBadge from '../components/FaceitLevelBadge.vue';
 import { faceitLevel } from '../lib/faceit';
-import { withScrollPreserved } from '../lib/scroll';
 
 const route = useRoute();
 const tournament = ref(null);
@@ -16,6 +15,8 @@ const leaderboard = ref([]);
 const draft = ref(null);
 const loading = ref(true);
 let pollTimer = null;
+let disposed = false;
+const loadError = ref('');
 
 // Стандартный размер состава CS2 — 5. Пока команда не набрана драфтом
 // целиком, пустые места показываем как явные слоты, а не просто обрываем
@@ -40,28 +41,36 @@ async function load() {
   // есть, второй раз его прятать не нужно.
   if (!tournament.value) loading.value = true;
 
-  await withScrollPreserved(async () => {
+  try {
     const [{ data: tData }, { data: lbData }, { data: dData }] = await Promise.all([
       apiClient.get(`/tournaments/${route.params.id}`),
       apiClient.get(`/tournaments/${route.params.id}/leaderboard`),
       apiClient.get(`/tournaments/${route.params.id}/draft`),
     ]);
+    if (disposed) return;
     tournament.value = tData.data;
     leaderboard.value = lbData.data;
     draft.value = dData.data;
-    loading.value = false;
-  });
+    loadError.value = '';
+  } catch (err) {
+    if (!disposed) loadError.value = 'Не удалось обновить турнир. Повторяем загрузку…';
+  } finally {
+    if (!disposed) loading.value = false;
+  }
 
   // Пока драфт активен — обновляем страницу сами, чтобы пики капитанов было
   // видно в реальном времени и здесь, а не только на отдельной /draft.
   clearTimeout(pollTimer);
-  if (draft.value?.status === 'active') {
+  if (!disposed && (draft.value?.status === 'active' || loadError.value)) {
     pollTimer = setTimeout(load, 3000);
   }
 }
 
 onMounted(load);
-onUnmounted(() => clearTimeout(pollTimer));
+onUnmounted(() => {
+  disposed = true;
+  clearTimeout(pollTimer);
+});
 </script>
 
 <template>
@@ -129,7 +138,7 @@ onUnmounted(() => clearTimeout(pollTimer));
           <ul class="team-roster">
             <li
               v-for="(slot, i) in rosterSlots(team)"
-              :key="slot.filled ? slot.player.player_id : `empty-${i}`"
+              :key="i"
               :class="{ 'team-roster__slot--empty': !slot.filled }"
             >
               <template v-if="slot.filled">
@@ -184,6 +193,7 @@ onUnmounted(() => clearTimeout(pollTimer));
     </section>
   </div>
   <p v-else-if="loading" class="container text-muted">Загрузка…</p>
+  <p v-else-if="loadError" class="container text-muted" role="status">{{ loadError }}</p>
 </template>
 
 <style scoped>
@@ -347,7 +357,17 @@ onUnmounted(() => clearTimeout(pollTimer));
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: 22px;
+  box-sizing: border-box;
+  height: 30px;
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  gap: 8px;
+}
+
+.team-roster .avatar-row {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 /* Пустой слот состава (см. rosterSlots) — пунктирная граница, чтобы явно
