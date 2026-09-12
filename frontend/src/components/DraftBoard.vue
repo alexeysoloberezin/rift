@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from './TeamElo.vue';
 import { computed } from 'vue';
 import PlayerAvatar from './PlayerAvatar.vue';
 
@@ -13,7 +14,7 @@ const props = defineProps({
   canReplace: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['pick', 'replace']);
+const emit = defineEmits(['pick', 'replace', 'remove']);
 
 const isFinished = computed(() => props.data.status === 'finished');
 
@@ -36,7 +37,7 @@ function faceitUrl(value) {
     <div class="draft-status card">
       <template v-if="isFinished">
         <strong>Драфт завершён</strong>
-        <span class="text-muted">Все зарегистрированные игроки распределены по командам.</span>
+        <span class="text-muted">Выбор игроков завершён.</span>
       </template>
       <template v-else>
         <strong>Раунд {{ data.round }} · Пик №{{ data.pick_number }}</strong>
@@ -57,7 +58,7 @@ function faceitUrl(value) {
         <div class="team-block__head">
           <PlayerAvatar :nickname="team.captain_nickname" :size="28" />
           <div>
-            <div class="team-block__name">{{ team.team_name }}</div>
+            <div class="team-block__name">{{ team.team_name }} <TeamElo :value="team.total_elo" /></div>
             <div class="team-block__captain text-muted">Капитан: {{ team.captain_nickname }}</div>
           </div>
           <span v-if="team.is_on_the_clock" class="clock-dot" title="Сейчас пикает"></span>
@@ -67,6 +68,7 @@ function faceitUrl(value) {
             <PlayerAvatar :nickname="p.nickname" :size="20" />
             {{ p.nickname }}
             <button v-if="canReplace" type="button" class="btn pick-btn" @click="emit('replace', p)">Заменить</button>
+            <button v-if="canReplace && isFinished" type="button" class="btn btn-danger pick-btn" @click="emit('remove', p)">Убрать</button>
           </li>
           <li v-if="team.picks.length === 0" class="text-muted roster-empty">Пока никого не выбрал</li>
         </ul>

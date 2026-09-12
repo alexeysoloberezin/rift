@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from '../components/TeamElo.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import apiClient from '../api/client';
@@ -73,7 +74,7 @@ async function onPick(playerId) {
       <div class="page-head">
         <div>
           <p class="text-muted eyebrow">{{ data.tournament_name }}</p>
-          <h1>Драфт — {{ myTeam?.team_name }}</h1>
+          <h1>Драфт — {{ myTeam?.team_name }} <TeamElo :value="myTeam?.total_elo" /></h1>
         </div>
         <div class="turn-banner" :class="{ 'turn-banner--active': isMyTurn }">
           {{ data.status === 'finished' ? 'Драфт завершён' : isMyTurn ? 'Ваш ход — выберите игрока' : 'Ожидание хода других капитанов…' }}

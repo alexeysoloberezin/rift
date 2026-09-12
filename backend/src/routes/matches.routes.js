@@ -1,3 +1,4 @@
+import { teamEloSql } from '../services/teamElo.sql.js';
 import { Router } from 'express';
 import fs from 'node:fs';
 import { query, withTransaction } from '../config/db.js';
@@ -12,7 +13,7 @@ const router = Router();
 router.get('/matches/:id', async (req, res) => {
   try {
     const { rows: matchRows } = await query(
-      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name
+      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_elo, ${teamEloSql('tb')} AS team_b_elo
        FROM matches m
        LEFT JOIN teams ta ON ta.id = m.team_a_id
        LEFT JOIN teams tb ON tb.id = m.team_b_id

@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from '../../components/TeamElo.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import apiClient from '../../api/client';
@@ -22,12 +23,32 @@ const replacingPick = ref(null);
 const replacementPlayerId = ref('');
 const savingReplacement = ref(false);
 const replacementError = ref('');
+const replacementDialog = ref(null);
+const removingDraftPlayer = ref(false);
+
+async function removeDraftPlayer(pick) {
+  if (removingDraftPlayer.value) return;
+  if (!window.confirm(`Убрать ${pick.nickname} из команды? Игрок останется в турнире, драфт останется завершённым.`)) return;
+  removingDraftPlayer.value = true;
+  draftError.value = '';
+  try {
+    await apiClient.delete(`/tournaments/${tournamentId}/draft/picks/${pick.pick_index}`, {
+      data: { expected_player_id: pick.player_id },
+    });
+    await loadAll();
+  } catch (err) {
+    draftError.value = err.response?.data?.error || 'Не удалось убрать игрока';
+  } finally {
+    removingDraftPlayer.value = false;
+  }
+}
 
 function startPickReplacement(pick) {
   if (savingReplacement.value) return;
   replacingPick.value = pick;
   replacementPlayerId.value = '';
   replacementError.value = '';
+  replacementDialog.value?.showModal();
 }
 
 async function replaceDraftPick() {
@@ -39,6 +60,7 @@ async function replaceDraftPick() {
       expected_player_id: replacingPick.value.player_id,
     });
     replacingPick.value = null;
+    replacementDialog.value?.close();
     await loadAll();
   } catch (err) {
     replacementError.value = err.response?.data?.error || 'Не удалось заменить игрока';
@@ -744,8 +766,9 @@ async function uploadDemo(matchId, e) {
       </template>
 
       <template v-else>
-        <DraftBoard :data="draft" can-replace @replace="startPickReplacement" />
-        <form v-if="replacingPick" class="card block" @submit.prevent="replaceDraftPick">
+        <DraftBoard :data="draft" can-replace @replace="startPickReplacement" @remove="removeDraftPlayer" />
+        <dialog ref="replacementDialog" class="replacement-dialog card" @cancel="savingReplacement ? $event.preventDefault() : replacingPick = null">
+        <form v-if="replacingPick" @submit.prevent="replaceDraftPick">
           <h3>Заменить {{ replacingPick.nickname }} (пик №{{ replacingPick.pick_index + 1 }})</h3>
           <p class="text-muted">Игрок вернётся в свободный пул. Очередь пиков сохранится.</p>
           <select v-model="replacementPlayerId" :disabled="savingReplacement" aria-label="Новый игрок">
@@ -753,10 +776,11 @@ async function uploadDemo(matchId, e) {
             <option v-for="player in draft.available_players" :key="player.id" :value="player.id">{{ player.nickname }}</option>
           </select>
           <button class="btn btn-primary" :disabled="savingReplacement || !replacementPlayerId">{{ savingReplacement ? 'Сохраняем…' : 'Заменить игрока' }}</button>
-          <button type="button" class="btn" :disabled="savingReplacement" @click="replacingPick = null">Отмена</button>
+          <button type="button" class="btn" :disabled="savingReplacement" @click="replacementDialog.close(); replacingPick = null">Отмена</button>
           <p v-if="!draft.available_players.length" class="text-muted">Нет свободных игроков для замены.</p>
           <p v-if="replacementError" class="delta-negative" role="alert">{{ replacementError }}</p>
         </form>
+        </dialog>
 
         <h3 class="links-title">Ссылки капитанов</h3>
         <p class="text-muted hint">
@@ -766,6 +790,7 @@ async function uploadDemo(matchId, e) {
           <div v-for="l in draftLinks" :key="l.team_id" class="captain-link-row">
             <span class="captain-link-name">
               {{ l.captain_nickname }} <span class="text-muted">({{ l.team_name }})</span>
+              <TeamElo :value="draft.teams.find(team => team.team_id === l.team_id)?.total_elo" />
             </span>
             <code class="mono captain-link-url">{{ captainLinkUrl(l.pick_token) }}</code>
             <button class="btn" @click="copyLink(l.pick_token)">
@@ -796,7 +821,7 @@ async function uploadDemo(matchId, e) {
 
       <div class="teams-list">
         <div v-for="team in tournament.teams" :key="team.id" class="card team-chip">
-          <strong>{{ team.name }}</strong>
+          <strong>{{ team.name }} <TeamElo :value="team.total_elo" /></strong>
           <span v-if="team.captain_name" class="text-muted">Капитан: {{ team.captain_name }}</span>
           <button class="btn" :disabled="savingCaptain" @click="editCaptain(team)">
             {{ team.captain_name ? 'Изменить ник капитана' : 'Указать ник капитана' }}
@@ -822,11 +847,11 @@ async function uploadDemo(matchId, e) {
       <div class="form-grid">
         <select v-model="newMatch.team_a_id">
           <option value="">Команда A</option>
-          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }}</option>
+          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
         </select>
         <select v-model="newMatch.team_b_id">
           <option value="">Команда B</option>
-          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }}</option>
+          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
         </select>
         <input v-model="newMatch.map" type="text" placeholder="Карта (de_mirage)" />
         <input v-model.number="newMatch.best_of" type="number" min="1" max="5" placeholder="BO" />
@@ -846,7 +871,7 @@ async function uploadDemo(matchId, e) {
         <div v-for="m in tournament.matches" :key="m.id" class="scoreboard-row match-manage-row">
           <MapBadge :map="m.map" size="sm" :show-label="false" />
           <RouterLink :to="`/matches/${m.id}`" class="match-manage-row__name">
-            {{ m.team_a_name || 'TBD' }} vs {{ m.team_b_name || 'TBD' }}
+            {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> vs {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" />
           </RouterLink>
           <StatusBadge :status="m.status" />
           <button class="btn" :disabled="m.status === 'parsing_demo' || savingMatchTeams" @click="editMatchTeams(m)">Изменить команды</button>
@@ -854,13 +879,13 @@ async function uploadDemo(matchId, e) {
             <label>Команда A
               <select v-model="matchTeams.team_a_id" :disabled="savingMatchTeams">
                 <option disabled value="">Выберите команду</option>
-                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }}</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Σ Elo {{ team.total_elo == null ? '—' : Number(team.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
               </select>
             </label>
             <label>Команда B
               <select v-model="matchTeams.team_b_id" :disabled="savingMatchTeams">
                 <option disabled value="">Выберите команду</option>
-                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }}</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Σ Elo {{ team.total_elo == null ? '—' : Number(team.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
               </select>
             </label>
             <button class="btn btn-primary" :disabled="savingMatchTeams || !matchTeams.team_a_id || !matchTeams.team_b_id || matchTeams.team_a_id === matchTeams.team_b_id" @click="saveMatchTeams">{{ savingMatchTeams ? 'Сохраняем…' : 'Сохранить' }}</button>
@@ -907,6 +932,16 @@ async function uploadDemo(matchId, e) {
 </template>
 
 <style scoped>
+.replacement-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 24px;
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+.replacement-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.replacement-dialog form { display: grid; gap: 12px; }
 .captain-name-editor {
   display: flex;
   flex-wrap: wrap;

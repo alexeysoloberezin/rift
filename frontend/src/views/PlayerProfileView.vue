@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from '../components/TeamElo.vue';
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import apiClient from '../api/client';
@@ -72,7 +73,7 @@ const sparklinePoints = computed(() => {
         :to="`/matches/${m.match_id}`"
         class="scoreboard-row match-history-row"
       >
-        <span>{{ m.team_a_name || '?' }} vs {{ m.team_b_name || '?' }}</span>
+        <span>{{ m.team_a_name || '?' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> vs {{ m.team_b_name || '?' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" /></span>
         <MapBadge :map="m.map" size="sm" />
         <span class="mono">{{ m.kills }}-{{ m.deaths }}-{{ m.assists }}</span>
         <span class="mono">{{ Number(m.match_rating || 0).toFixed(2) }}</span>

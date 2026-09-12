@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from '../components/TeamElo.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import apiClient from '../api/client';
@@ -91,13 +92,13 @@ function teamNameForSide(side) {
         <MapBadge :map="match.map" size="lg" />
       </div>
       <div class="teams-line">
-        <h1>{{ match.team_a_name || 'Команда A' }}</h1>
+        <h1>{{ match.team_a_name || 'Команда A' }} <TeamElo v-if="match.team_a_name" :value="match.team_a_elo" /></h1>
         <div class="score-block mono">
           <span>{{ match.score_a ?? '–' }}</span>
           <span class="score-sep">:</span>
           <span>{{ match.score_b ?? '–' }}</span>
         </div>
-        <h1>{{ match.team_b_name || 'Команда B' }}</h1>
+        <h1>{{ match.team_b_name || 'Команда B' }} <TeamElo v-if="match.team_b_name" :value="match.team_b_elo" /></h1>
       </div>
       <div class="meta-line text-muted mono">
         <span>BO{{ match.best_of }}</span>

@@ -350,4 +350,31 @@ router.put('/tournaments/:id/draft/picks/:pickIndex', requireAdmin, async (req, 
   }
 });
 
+router.delete('/tournaments/:id/draft/picks/:pickIndex', requireAdmin, async (req, res) => {
+  try {
+    const index = Number(req.params.pickIndex);
+    const expected = req.body.expected_player_id;
+    if (!Number.isSafeInteger(index) || index < 0 || typeof expected !== 'string') {
+      throw pickError('Укажите номер пика и игрока', 400);
+    }
+    await withTransaction(async (tx) => {
+      const { rows } = await tx.query('SELECT * FROM drafts WHERE tournament_id = $1 FOR UPDATE', [req.params.id]);
+      const draft = rows[0];
+      if (!draft) throw pickError('Драфт не найден', 404);
+      if (draft.status !== 'finished') throw pickError('Удаление доступно только после завершения драфта', 409);
+      const { rows: picks } = await tx.query('SELECT * FROM draft_picks WHERE draft_id = $1 AND pick_index = $2', [draft.id, index]);
+      const pick = picks[0];
+      if (!pick) throw pickError('Пик уже удалён', 404);
+      if (pick.player_id !== expected.toLowerCase()) throw pickError('Игрок в этом пике изменился. Обновите страницу.', 409);
+      const { rowCount } = await tx.query('DELETE FROM team_players WHERE team_id = $1 AND player_id = $2 AND is_captain = false', [pick.team_id, pick.player_id]);
+      if (rowCount !== 1) throw pickError('Игрок отсутствует в составе или является капитаном', 409);
+      await tx.query('DELETE FROM draft_picks WHERE id = $1', [pick.id]);
+      await tx.query('UPDATE drafts SET updated_at = now() WHERE id = $1', [draft.id]);
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

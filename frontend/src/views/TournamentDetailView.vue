@@ -1,4 +1,5 @@
 <script setup>
+import TeamElo from '../components/TeamElo.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import apiClient from '../api/client';
@@ -119,7 +120,7 @@ onUnmounted(() => {
           <MapBadge :map="m.map" size="md" :show-label="false" />
           <div>
             <div class="match-row__teams">
-              {{ m.team_a_name || 'TBD' }} <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }}
+              {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" />
             </div>
             <div class="text-muted match-row__meta">{{ m.map || 'карта не выбрана' }} · {{ m.round_number || '—' }}</div>
           </div>
@@ -134,7 +135,7 @@ onUnmounted(() => {
       <h2 class="block-title" style="margin-top: 32px">Команды</h2>
       <div class="teams-grid">
         <div v-for="team in tournament.teams" :key="team.id" class="card team-card">
-          <h3>{{ team.name }}</h3>
+          <h3>{{ team.name }} <TeamElo :value="team.total_elo" /></h3>
           <ul class="team-roster">
             <li
               v-for="(slot, i) in rosterSlots(team)"
