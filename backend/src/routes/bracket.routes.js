@@ -32,7 +32,7 @@ function sortSlots(rows) {
 router.get('/tournaments/:tournamentId/bracket', async (req, res) => {
   try {
     const { rows } = await query(
-      `SELECT bs.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_elo, ${teamEloSql('tb')} AS team_b_elo,
+      `SELECT bs.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo,
               m.status AS match_status, m.score_a AS match_score_a, m.score_b AS match_score_b, m.map AS match_map
        FROM bracket_slots bs
        LEFT JOIN teams ta ON ta.id = bs.team_a_id

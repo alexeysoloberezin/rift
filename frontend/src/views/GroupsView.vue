@@ -78,7 +78,7 @@ const QUALIFY_COUNT = 2;
             :class="{ 'standings-row--qualified': i < QUALIFY_COUNT }"
           >
             <span class="standings-rank mono">{{ i + 1 }}</span>
-            <span>{{ row.team.name }} <TeamElo :value="row.team.total_elo" /></span>
+            <span>{{ row.team.name }} <TeamElo :value="row.team.average_elo" /></span>
             <span class="mono">{{ row.w }}</span>
             <span class="mono">{{ row.l }}</span>
           </div>
@@ -98,7 +98,7 @@ const QUALIFY_COUNT = 2;
           >
             <MapBadge :map="m.map" size="sm" :show-label="false" />
             <div class="match-row__teams">
-              {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" />
+              {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" />
             </div>
             <div class="match-row__right">
               <span v-if="m.score_a !== null" class="mono">{{ m.score_a }}:{{ m.score_b }}</span>

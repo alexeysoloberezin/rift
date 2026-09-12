@@ -73,7 +73,7 @@ const sparklinePoints = computed(() => {
         :to="`/matches/${m.match_id}`"
         class="scoreboard-row match-history-row"
       >
-        <span>{{ m.team_a_name || '?' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> vs {{ m.team_b_name || '?' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" /></span>
+        <span>{{ m.team_a_name || '?' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> vs {{ m.team_b_name || '?' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" /></span>
         <MapBadge :map="m.map" size="sm" />
         <span class="mono">{{ m.kills }}-{{ m.deaths }}-{{ m.assists }}</span>
         <span class="mono">{{ Number(m.match_rating || 0).toFixed(2) }}</span>

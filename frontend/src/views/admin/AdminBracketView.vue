@@ -162,8 +162,8 @@ function onNodeClick({ node }) {
           <template #node-slot="{ data }">
             <div class="bracket-node" :class="{ 'bracket-node--selected': selectedSlotId === data.id }">
               <div class="bracket-node__round">{{ slotLabel(data) }}</div>
-              <div class="bracket-node__team">{{ data.team_a_name || 'TBD' }} <TeamElo v-if="data.team_a_name" :value="data.team_a_elo" /></div>
-              <div class="bracket-node__team">{{ data.team_b_name || 'TBD' }} <TeamElo v-if="data.team_b_name" :value="data.team_b_elo" /></div>
+              <div class="bracket-node__team">{{ data.team_a_name || 'TBD' }} <TeamElo v-if="data.team_a_name" :value="data.team_a_average_elo" /></div>
+              <div class="bracket-node__team">{{ data.team_b_name || 'TBD' }} <TeamElo v-if="data.team_b_name" :value="data.team_b_average_elo" /></div>
             </div>
           </template>
         </VueFlow>
@@ -180,11 +180,11 @@ function onNodeClick({ node }) {
         <div class="form-grid">
           <select v-model="drafts[slot.id].team_a_id">
             <option value="">Команда A — TBD</option>
-            <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+            <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Среднее Elo {{ t.average_elo == null ? '—' : Number(t.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
           </select>
           <select v-model="drafts[slot.id].team_b_id">
             <option value="">Команда B — TBD</option>
-            <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+            <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Среднее Elo {{ t.average_elo == null ? '—' : Number(t.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
           </select>
           <select v-model="drafts[slot.id].match_id" class="match-select">
             <option value="">Без привязанного матча</option>

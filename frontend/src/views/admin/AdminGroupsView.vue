@@ -132,7 +132,7 @@ async function onAssignChange(teamId, e) {
             <span>Группа</span>
           </div>
           <div v-for="t in tournament.teams" :key="t.id" class="scoreboard-row assign-row">
-            <span>{{ t.name }} <TeamElo :value="t.total_elo" /></span>
+            <span>{{ t.name }} <TeamElo :value="t.average_elo" /></span>
             <select :value="teamGroupId[t.id] || ''" :disabled="assigningTeamId === t.id" @change="onAssignChange(t.id, $event)">
               <option value="">—</option>
               <option v-for="g in groups" :key="g.id" :value="g.id">{{ g.name }}</option>

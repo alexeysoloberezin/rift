@@ -40,7 +40,7 @@ export async function getDraftBoard(tournamentId) {
   // (см. draft.routes.js), админу — для рассылки капитанам вручную.
   const { rows: draftTeams } = await query(
     `SELECT dt.id, dt.draft_id, dt.team_id, dt.captain_id, dt.seed_order,
-            t.name AS team_name, t.tag AS team_tag, ${teamEloSql('t')} AS total_elo,
+            t.name AS team_name, t.tag AS team_tag, ${teamEloSql('t')} AS average_elo,
             p.nickname AS captain_nickname, p.avatar_url AS captain_avatar_url
      FROM draft_teams dt
      JOIN teams t ON t.id = dt.team_id

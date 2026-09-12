@@ -106,11 +106,11 @@ function isWinner(data, side) {
           <div class="bracket-node" :class="{ 'bracket-node--final': data.isFinal }">
             <div class="bracket-node__round">{{ data.label }}</div>
             <div class="bracket-node__team" :class="{ 'bracket-node__team--winner': isWinner(data, 'a') }">
-              <span class="bracket-node__name">{{ data.team_a_name || 'TBD' }} <TeamElo v-if="data.team_a_name" :value="data.team_a_elo" /></span>
+              <span class="bracket-node__name">{{ data.team_a_name || 'TBD' }} <TeamElo v-if="data.team_a_name" :value="data.team_a_average_elo" /></span>
               <span v-if="data.match_score_a !== null" class="mono">{{ data.match_score_a }}</span>
             </div>
             <div class="bracket-node__team" :class="{ 'bracket-node__team--winner': isWinner(data, 'b') }">
-              <span class="bracket-node__name">{{ data.team_b_name || 'TBD' }} <TeamElo v-if="data.team_b_name" :value="data.team_b_elo" /></span>
+              <span class="bracket-node__name">{{ data.team_b_name || 'TBD' }} <TeamElo v-if="data.team_b_name" :value="data.team_b_average_elo" /></span>
               <span v-if="data.match_score_b !== null" class="mono">{{ data.match_score_b }}</span>
             </div>
             <RouterLink v-if="data.match_id" :to="`/matches/${data.match_id}`" class="bracket-node__link">

@@ -34,7 +34,7 @@ router.get('/:id', async (req, res) => {
     );
 
     const { rows: matchStats } = await query(
-      `SELECT mps.*, m.map, m.played_at, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_elo, ${teamEloSql('tb')} AS team_b_elo
+      `SELECT mps.*, m.map, m.played_at, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
        FROM match_player_stats mps
        JOIN matches m ON m.id = mps.match_id
        LEFT JOIN teams ta ON ta.id = m.team_a_id

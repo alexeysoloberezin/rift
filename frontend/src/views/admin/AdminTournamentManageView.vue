@@ -790,7 +790,7 @@ async function uploadDemo(matchId, e) {
           <div v-for="l in draftLinks" :key="l.team_id" class="captain-link-row">
             <span class="captain-link-name">
               {{ l.captain_nickname }} <span class="text-muted">({{ l.team_name }})</span>
-              <TeamElo :value="draft.teams.find(team => team.team_id === l.team_id)?.total_elo" />
+              <TeamElo :value="draft.teams.find(team => team.team_id === l.team_id)?.average_elo" />
             </span>
             <code class="mono captain-link-url">{{ captainLinkUrl(l.pick_token) }}</code>
             <button class="btn" @click="copyLink(l.pick_token)">
@@ -821,7 +821,7 @@ async function uploadDemo(matchId, e) {
 
       <div class="teams-list">
         <div v-for="team in tournament.teams" :key="team.id" class="card team-chip">
-          <strong>{{ team.name }} <TeamElo :value="team.total_elo" /></strong>
+          <strong>{{ team.name }} <TeamElo :value="team.average_elo" /></strong>
           <span v-if="team.captain_name" class="text-muted">Капитан: {{ team.captain_name }}</span>
           <button class="btn" :disabled="savingCaptain" @click="editCaptain(team)">
             {{ team.captain_name ? 'Изменить ник капитана' : 'Указать ник капитана' }}
@@ -847,11 +847,11 @@ async function uploadDemo(matchId, e) {
       <div class="form-grid">
         <select v-model="newMatch.team_a_id">
           <option value="">Команда A</option>
-          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Среднее Elo {{ t.average_elo == null ? '—' : Number(t.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
         </select>
         <select v-model="newMatch.team_b_id">
           <option value="">Команда B</option>
-          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Σ Elo {{ t.total_elo == null ? '—' : Number(t.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+          <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Среднее Elo {{ t.average_elo == null ? '—' : Number(t.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
         </select>
         <input v-model="newMatch.map" type="text" placeholder="Карта (de_mirage)" />
         <input v-model.number="newMatch.best_of" type="number" min="1" max="5" placeholder="BO" />
@@ -871,7 +871,7 @@ async function uploadDemo(matchId, e) {
         <div v-for="m in tournament.matches" :key="m.id" class="scoreboard-row match-manage-row">
           <MapBadge :map="m.map" size="sm" :show-label="false" />
           <RouterLink :to="`/matches/${m.id}`" class="match-manage-row__name">
-            {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> vs {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" />
+            {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> vs {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" />
           </RouterLink>
           <StatusBadge :status="m.status" />
           <button class="btn" :disabled="m.status === 'parsing_demo' || savingMatchTeams" @click="editMatchTeams(m)">Изменить команды</button>
@@ -879,13 +879,13 @@ async function uploadDemo(matchId, e) {
             <label>Команда A
               <select v-model="matchTeams.team_a_id" :disabled="savingMatchTeams">
                 <option disabled value="">Выберите команду</option>
-                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Σ Elo {{ team.total_elo == null ? '—' : Number(team.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Среднее Elo {{ team.average_elo == null ? '—' : Number(team.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
               </select>
             </label>
             <label>Команда B
               <select v-model="matchTeams.team_b_id" :disabled="savingMatchTeams">
                 <option disabled value="">Выберите команду</option>
-                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Σ Elo {{ team.total_elo == null ? '—' : Number(team.total_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }} · Среднее Elo {{ team.average_elo == null ? '—' : Number(team.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
               </select>
             </label>
             <button class="btn btn-primary" :disabled="savingMatchTeams || !matchTeams.team_a_id || !matchTeams.team_b_id || matchTeams.team_a_id === matchTeams.team_b_id" @click="saveMatchTeams">{{ savingMatchTeams ? 'Сохраняем…' : 'Сохранить' }}</button>

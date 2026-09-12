@@ -24,7 +24,11 @@ const loadError = ref('');
 // список — так видно, скольких игроков ещё не хватает.
 const ROSTER_SIZE = 5;
 function rosterSlots(team) {
-  const slots = team.players.map((p) => ({ filled: true, player: p }));
+  const players = [...team.players].sort((a, b) =>
+    (b.seed_rating == null ? -Infinity : Number(b.seed_rating)) -
+    (a.seed_rating == null ? -Infinity : Number(a.seed_rating)) || a.nickname.localeCompare(b.nickname)
+  );
+  const slots = players.map((p) => ({ filled: true, player: p }));
   while (slots.length < ROSTER_SIZE) slots.push({ filled: false });
   return slots;
 }
@@ -120,7 +124,7 @@ onUnmounted(() => {
           <MapBadge :map="m.map" size="md" :show-label="false" />
           <div>
             <div class="match-row__teams">
-              {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_elo" /> <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_elo" />
+              {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> <span class="text-muted">vs</span> {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" />
             </div>
             <div class="text-muted match-row__meta">{{ m.map || 'карта не выбрана' }} · {{ m.round_number || '—' }}</div>
           </div>
@@ -135,7 +139,7 @@ onUnmounted(() => {
       <h2 class="block-title" style="margin-top: 32px">Команды</h2>
       <div class="teams-grid">
         <div v-for="team in tournament.teams" :key="team.id" class="card team-card">
-          <h3>{{ team.name }} <TeamElo :value="team.total_elo" /></h3>
+          <h3>{{ team.name }} <TeamElo :value="team.average_elo" /></h3>
           <ul class="team-roster">
             <li
               v-for="(slot, i) in rosterSlots(team)"

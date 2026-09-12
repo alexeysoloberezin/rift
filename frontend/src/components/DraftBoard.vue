@@ -58,7 +58,7 @@ function faceitUrl(value) {
         <div class="team-block__head">
           <PlayerAvatar :nickname="team.captain_nickname" :size="28" />
           <div>
-            <div class="team-block__name">{{ team.team_name }} <TeamElo :value="team.total_elo" /></div>
+            <div class="team-block__name">{{ team.team_name }} <TeamElo :value="team.average_elo" /></div>
             <div class="team-block__captain text-muted">Капитан: {{ team.captain_nickname }}</div>
           </div>
           <span v-if="team.is_on_the_clock" class="clock-dot" title="Сейчас пикает"></span>

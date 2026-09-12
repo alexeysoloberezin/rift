@@ -3,11 +3,11 @@ defineProps({ value: { type: [Number, String], default: null } });
 </script>
 
 <template>
-  <small class="team-elo" title="Сумма известных FACEIT Elo текущего состава команды, включая капитана">
-    Σ Elo {{ value == null ? '—' : Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}
+  <small class="team-elo" title="Среднее известное FACEIT Elo текущего состава команды, включая капитана">
+    Среднее Elo {{ value == null ? '—' : Number(value).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}
   </small>
 </template>
 
 <style scoped>
-.team-elo { display: inline-block; color: var(--gold); font-size: 11px; font-weight: 500; white-space: nowrap; margin-left: 6px; }
+.team-elo { display: inline-block; color: var(--gold); font-size: 14px; font-weight: 600; white-space: nowrap; margin-left: 6px; }
 </style>

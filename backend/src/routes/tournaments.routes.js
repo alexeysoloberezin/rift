@@ -37,7 +37,7 @@ router.get('/:id', async (req, res) => {
     // фронту, чтобы показать уровень FACEIT в составах команд (см.
     // frontend/src/lib/faceit.js).
     const { rows: teams } = await query(
-      `SELECT tm.*, ${teamEloSql('tm')} AS total_elo, COALESCE(json_agg(json_build_object(
+      `SELECT tm.*, ${teamEloSql('tm')} AS average_elo, COALESCE(json_agg(json_build_object(
           'player_id', p.id, 'nickname', p.nickname, 'rating', p.rating, 'is_captain', tp.is_captain,
           'seed_rating', tpx.seed_rating
         )) FILTER (WHERE p.id IS NOT NULL), '[]') AS players
@@ -52,7 +52,7 @@ router.get('/:id', async (req, res) => {
     );
 
     const { rows: matches } = await query(
-      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_elo, ${teamEloSql('tb')} AS team_b_elo
+      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
        FROM matches m
        LEFT JOIN teams ta ON ta.id = m.team_a_id
        LEFT JOIN teams tb ON tb.id = m.team_b_id
