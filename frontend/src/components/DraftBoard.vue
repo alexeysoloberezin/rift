@@ -10,9 +10,10 @@ const props = defineProps({
   data: { type: Object, required: true }, // результат GET .../draft (не null)
   canPick: { type: Boolean, default: false },
   picking: { type: Boolean, default: false },
+  canReplace: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['pick']);
+const emit = defineEmits(['pick', 'replace']);
 
 const isFinished = computed(() => props.data.status === 'finished');
 
@@ -65,6 +66,7 @@ function faceitUrl(value) {
           <li v-for="p in team.picks" :key="p.player_id" class="avatar-row">
             <PlayerAvatar :nickname="p.nickname" :size="20" />
             {{ p.nickname }}
+            <button v-if="canReplace" type="button" class="btn pick-btn" @click="emit('replace', p)">Заменить</button>
           </li>
           <li v-if="team.picks.length === 0" class="text-muted roster-empty">Пока никого не выбрал</li>
         </ul>

@@ -18,6 +18,34 @@ const loading = ref(true);
 
 // Драфт капитанов
 const draft = ref(null);
+const replacingPick = ref(null);
+const replacementPlayerId = ref('');
+const savingReplacement = ref(false);
+const replacementError = ref('');
+
+function startPickReplacement(pick) {
+  if (savingReplacement.value) return;
+  replacingPick.value = pick;
+  replacementPlayerId.value = '';
+  replacementError.value = '';
+}
+
+async function replaceDraftPick() {
+  savingReplacement.value = true;
+  replacementError.value = '';
+  try {
+    await apiClient.put(`/tournaments/${tournamentId}/draft/picks/${replacingPick.value.pick_index}`, {
+      player_id: replacementPlayerId.value,
+      expected_player_id: replacingPick.value.player_id,
+    });
+    replacingPick.value = null;
+    await loadAll();
+  } catch (err) {
+    replacementError.value = err.response?.data?.error || 'Не удалось заменить игрока';
+  } finally {
+    savingReplacement.value = false;
+  }
+}
 const draftLinks = ref([]);
 const draftTeamsCount = ref(8);
 const startingDraft = ref(false);
@@ -716,7 +744,19 @@ async function uploadDemo(matchId, e) {
       </template>
 
       <template v-else>
-        <DraftBoard :data="draft" />
+        <DraftBoard :data="draft" can-replace @replace="startPickReplacement" />
+        <form v-if="replacingPick" class="card block" @submit.prevent="replaceDraftPick">
+          <h3>Заменить {{ replacingPick.nickname }} (пик №{{ replacingPick.pick_index + 1 }})</h3>
+          <p class="text-muted">Игрок вернётся в свободный пул. Очередь пиков сохранится.</p>
+          <select v-model="replacementPlayerId" :disabled="savingReplacement" aria-label="Новый игрок">
+            <option disabled value="">Выберите замену</option>
+            <option v-for="player in draft.available_players" :key="player.id" :value="player.id">{{ player.nickname }}</option>
+          </select>
+          <button class="btn btn-primary" :disabled="savingReplacement || !replacementPlayerId">{{ savingReplacement ? 'Сохраняем…' : 'Заменить игрока' }}</button>
+          <button type="button" class="btn" :disabled="savingReplacement" @click="replacingPick = null">Отмена</button>
+          <p v-if="!draft.available_players.length" class="text-muted">Нет свободных игроков для замены.</p>
+          <p v-if="replacementError" class="delta-negative" role="alert">{{ replacementError }}</p>
+        </form>
 
         <h3 class="links-title">Ссылки капитанов</h3>
         <p class="text-muted hint">

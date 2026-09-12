@@ -21,6 +21,8 @@ function pickError(message, statusCode) {
 // закрывает драфт) — общая логика для пика капитаном по токену и
 // админ-пика "за капитана". tx — клиент внутри транзакции.
 async function performPick(tx, { draftId, tournamentId, teamId, playerId, teamsCount, pickedBy }) {
+  const { rows: locked } = await tx.query('SELECT status FROM drafts WHERE id = $1 FOR UPDATE', [draftId]);
+  if (!locked.length || locked[0].status !== 'active') throw pickError('Драфт уже завершён или сброшен', 409);
   const { rows: pickCountRows } = await tx.query('SELECT COUNT(*)::int AS c FROM draft_picks WHERE draft_id = $1', [
     draftId,
   ]);
@@ -309,6 +311,39 @@ router.put('/tournaments/:id/draft/admin-pick', requireAdmin, async (req, res) =
       });
     });
 
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ success: false, error: err.message });
+  }
+});
+
+router.put('/tournaments/:id/draft/picks/:pickIndex', requireAdmin, async (req, res) => {
+  try {
+    const index = Number(req.params.pickIndex);
+    const { player_id, expected_player_id } = req.body;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!Number.isSafeInteger(index) || index < 0 || !uuid.test(player_id || '') || !uuid.test(expected_player_id || '')) {
+      throw pickError('Укажите номер пика и игроков', 400);
+    }
+    await withTransaction(async (tx) => {
+      const { rows: drafts } = await tx.query('SELECT * FROM drafts WHERE tournament_id = $1 FOR UPDATE', [req.params.id]);
+      const draft = drafts[0];
+      if (!draft) throw pickError('Драфт не найден', 404);
+      const { rows: picks } = await tx.query('SELECT * FROM draft_picks WHERE draft_id = $1 AND pick_index = $2', [draft.id, index]);
+      const pick = picks[0];
+      if (!pick) throw pickError('Пик не найден', 404);
+      if (pick.player_id !== expected_player_id.toLowerCase()) throw pickError('Пик уже изменён другим администратором. Обновите страницу.', 409);
+      const { rows: available } = await tx.query(
+        `SELECT player_id FROM tournament_players WHERE tournament_id = $1 AND player_id = $2
+         AND NOT EXISTS (SELECT 1 FROM team_players tp JOIN draft_teams dt ON dt.team_id = tp.team_id
+           WHERE dt.draft_id = $3 AND tp.player_id = $2)`, [req.params.id, player_id, draft.id]);
+      if (!available.length) throw pickError('Игрок уже выбран или не зарегистрирован в турнире', 409);
+      const { rowCount } = await tx.query('DELETE FROM team_players WHERE team_id = $1 AND player_id = $2 AND is_captain = false', [pick.team_id, pick.player_id]);
+      if (rowCount !== 1) throw pickError('Состав изменился: заменять можно только обычный пик, не капитана', 409);
+      await tx.query('INSERT INTO team_players (team_id, player_id, is_captain) VALUES ($1, $2, false)', [pick.team_id, player_id]);
+      await tx.query('UPDATE draft_picks SET player_id = $1, picked_by = $2 WHERE id = $3', [player_id, 'admin', pick.id]);
+      await tx.query('UPDATE drafts SET updated_at = now() WHERE id = $1', [draft.id]);
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(err.statusCode || 500).json({ success: false, error: err.message });
