@@ -222,4 +222,37 @@ router.delete('/matches/:id', requireAdmin, async (req, res) => {
   }
 });
 
+// Change both sides atomically, including existing player statistics.
+router.put('/matches/:id/teams', requireAdmin, async (req, res) => {
+  try {
+    const { team_a_id: a, team_b_id: b } = req.body;
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (typeof a !== 'string' || typeof b !== 'string' || !uuid.test(a) || !uuid.test(b) || a.toLowerCase() === b.toLowerCase()) {
+      return res.status(400).json({ success: false, error: 'Выберите две разные команды' });
+    }
+    const result = await withTransaction(async (tx) => {
+      const { rows } = await tx.query('SELECT * FROM matches WHERE id = $1 FOR UPDATE', [req.params.id]);
+      const match = rows[0];
+      if (!match) throw Object.assign(new Error('Матч не найден'), { statusCode: 404 });
+      if (match.status === 'parsing_demo') throw Object.assign(new Error('Дождитесь завершения обработки демо'), { statusCode: 409 });
+      const { rows: teams } = await tx.query('SELECT id FROM teams WHERE tournament_id = $1 AND id = ANY($2::uuid[]) FOR KEY SHARE', [match.tournament_id, [a, b]]);
+      if (teams.length !== 2) throw Object.assign(new Error('Обе команды должны принадлежать турниру матча'), { statusCode: 400 });
+      const { rows: ambiguous } = await tx.query(
+        `SELECT 1 FROM match_player_stats WHERE match_id = $1 AND
+          (team_id IS NULL OR team_id NOT IN (SELECT unnest($2::uuid[])) OR $3::boolean) LIMIT 1`,
+        [match.id, [match.team_a_id, match.team_b_id].filter(Boolean), match.team_a_id === match.team_b_id]);
+      if (ambiguous.length) throw Object.assign(new Error('Невозможно определить стороны сохранённой статистики. Сначала исправьте или повторно обработайте демо.'), { statusCode: 409 });
+      await tx.query(`UPDATE match_player_stats SET team_id = CASE
+        WHEN team_id = $2 THEN $4::uuid WHEN team_id = $3 THEN $5::uuid ELSE team_id END WHERE match_id = $1`,
+        [match.id, match.team_a_id, match.team_b_id, a, b]);
+      const { rows: updated } = await tx.query('UPDATE matches SET team_a_id = $1, team_b_id = $2, teams_manually_set = true WHERE id = $3 RETURNING *', [a, b, match.id]);
+      await tx.query('UPDATE bracket_slots SET team_a_id = $1, team_b_id = $2, updated_at = now() WHERE match_id = $3', [a, b, match.id]);
+      return updated[0];
+    });
+    res.json({ success: true, data: result });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;

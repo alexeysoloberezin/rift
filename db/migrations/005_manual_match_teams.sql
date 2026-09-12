@@ -1,0 +1,1 @@
+ALTER TABLE matches ADD COLUMN IF NOT EXISTS teams_manually_set BOOLEAN NOT NULL DEFAULT false;

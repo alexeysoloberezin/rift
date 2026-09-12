@@ -1,6 +1,7 @@
 import { withTransaction } from '../config/db.js';
 import { parseDemoFile } from './demoParser.client.js';
 import { computeMatchRating, computeEloSwing } from './rating.service.js';
+import { matchTeamsByCaptain, normalizeCaptainName } from './teamCaptainMatching.js';
 
 /**
  * Находит игрока в БД по steam_id64, а если не найден — по нику (без учёта
@@ -37,18 +38,28 @@ async function resolvePlayer(tx, { steamId, nickname }) {
  * и на странице матча обе колонки фильтровались одинаково (NULL === NULL) —
  * то есть в обеих показывались все 10 игроков сразу.
  *
- * Вместо того чтобы требовать команды заранее, при отсутствующей стороне
- * заводим для неё "автосостав" — новую команду в этом же турнире, названную
+ * Сначала ищем команды турнира по никам капитанов на каждой стороне демо.
+ * Если совпадения нет и команда не задана, заводим "автосостав", названный
  * по карте матча (можно переименовать в админке команд позже), и сразу
  * заполняем её реальным составом из демки. Так демку можно грузить и без
  * предварительного создания команд — стороны просто возьмутся из самой игры.
  */
 async function ensureMatchTeams(tx, match, parsed) {
   const autoCreated = { A: false, B: false };
-  if (match.team_a_id && match.team_b_id) return { match, autoCreated };
+  if (match.teams_manually_set && match.team_a_id && match.team_b_id) {
+    return { match, autoCreated, captainTeams: { A: null, B: null } };
+  }
+  const { rows: teams } = await tx.query(
+    'SELECT id, name, captain_name FROM teams WHERE tournament_id = $1 AND captain_name IS NOT NULL',
+    [match.tournament_id]
+  );
+  const captainTeams = matchTeamsByCaptain(teams, parsed.players);
 
-  let teamAId = match.team_a_id;
-  let teamBId = match.team_b_id;
+  let teamAId = captainTeams.A?.id || match.team_a_id;
+  let teamBId = captainTeams.B?.id || match.team_b_id;
+  if (teamAId && teamAId === teamBId) {
+    throw new Error('Капитан в демо противоречит выбранным командам матча: одна команда оказалась на обеих сторонах');
+  }
 
   if (!teamAId) {
     const { rows } = await tx.query(
@@ -68,7 +79,7 @@ async function ensureMatchTeams(tx, match, parsed) {
   }
 
   await tx.query('UPDATE matches SET team_a_id = $1, team_b_id = $2 WHERE id = $3', [teamAId, teamBId, match.id]);
-  return { match: { ...match, team_a_id: teamAId, team_b_id: teamBId }, autoCreated };
+  return { match: { ...match, team_a_id: teamAId, team_b_id: teamBId }, autoCreated, captainTeams };
 }
 
 /**
@@ -93,7 +104,7 @@ export async function processDemo(demoId, matchId, filePath) {
 
     const ensured = await ensureMatchTeams(tx, match, parsed);
     match = ensured.match;
-    const { autoCreated } = ensured;
+    const { autoCreated, captainTeams } = ensured;
 
     // Матч мог уже обрабатываться раньше (переобработка после фикса парсера,
     // перезалив исправленной демки и т.д.). Если брать "рейтинг до матча" из
@@ -173,14 +184,17 @@ export async function processDemo(demoId, matchId, filePath) {
     for (const { pStat, player, matchRating, isReprocess } of resolved) {
       const teamId = pStat.side_majority === 'A' ? match.team_a_id : match.team_b_id;
 
-      // Автосозданной команде (см. ensureMatchTeams) сразу заполняем реальный
-      // состав из демки — иначе это была бы команда без единого игрока в
-      // разделе "Команды". Для команды, которую выбрал сам админ, состав не
-      // трогаем — он куратора турнира, а не парсера демки.
-      if ((pStat.side_majority === 'A' && autoCreated.A) || (pStat.side_majority === 'B' && autoCreated.B)) {
-        await tx.query('INSERT INTO team_players (team_id, player_id) VALUES ($1, $2) ON CONFLICT DO NOTHING', [
+      // Добавляем участников демо в автосостав или команду, найденную по
+      // капитану. Существующих участников не удаляем (возможны замены).
+      const side = pStat.side_majority === 'A' ? 'A' : 'B';
+      if (autoCreated[side] || captainTeams[side]) {
+        const isCaptain = Boolean(captainTeams[side]) &&
+          normalizeCaptainName(pStat.nickname) === normalizeCaptainName(captainTeams[side].captain_name);
+        await tx.query(`INSERT INTO team_players (team_id, player_id, is_captain) VALUES ($1, $2, $3)
+          ON CONFLICT (team_id, player_id) DO UPDATE SET is_captain = EXCLUDED.is_captain`, [
           teamId,
           player.id,
+          isCaptain,
         ]);
       }
 

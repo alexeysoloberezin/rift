@@ -93,10 +93,75 @@ const importing = ref(false);
 const importError = ref('');
 
 // Team creation
-const newTeam = ref({ name: '', tag: '' });
+const newTeam = ref({ name: '', captain_name: '', tag: '' });
 const selectedPlayerIds = ref([]);
 const teamError = ref('');
 const creatingTeam = ref(false);
+const deletingTeamId = ref(null);
+const editingCaptainTeamId = ref(null);
+const captainNameInput = ref('');
+const savingCaptain = ref(false);
+const captainError = ref('');
+
+function editCaptain(team) {
+  editingCaptainTeamId.value = team.id;
+  captainNameInput.value = team.captain_name || '';
+  captainError.value = '';
+}
+
+async function saveCaptain() {
+  savingCaptain.value = true;
+  captainError.value = '';
+  try {
+    await apiClient.put(`/tournaments/${tournamentId}/teams/${editingCaptainTeamId.value}/captain`, {
+      captain_name: captainNameInput.value,
+    });
+    editingCaptainTeamId.value = null;
+    await loadAll();
+  } catch (err) {
+    captainError.value = err.response?.data?.error || 'Не удалось сохранить ник капитана';
+  } finally {
+    savingCaptain.value = false;
+  }
+}
+const editingMatchId = ref(null);
+const matchTeams = ref({ team_a_id: '', team_b_id: '' });
+const savingMatchTeams = ref(false);
+const matchTeamsError = ref('');
+
+async function deleteTeam(team) {
+  if (!window.confirm(`Удалить команду «${team.name}»? Она также будет убрана из группы и слотов сетки. Игроки останутся в турнире.`)) return;
+  deletingTeamId.value = team.id;
+  teamError.value = '';
+  try {
+    await apiClient.delete(`/tournaments/${tournamentId}/teams/${team.id}`);
+    await loadAll();
+  } catch (err) {
+    teamError.value = err.response?.data?.error || 'Не удалось удалить команду';
+  } finally {
+    deletingTeamId.value = null;
+  }
+}
+
+function editMatchTeams(match) {
+  editingMatchId.value = match.id;
+  matchTeams.value = { team_a_id: match.team_a_id || '', team_b_id: match.team_b_id || '' };
+  matchTeamsError.value = '';
+}
+
+async function saveMatchTeams() {
+  savingMatchTeams.value = true;
+  matchTeamsError.value = '';
+  try {
+    await apiClient.put(`/matches/${editingMatchId.value}/teams`, matchTeams.value);
+    editingMatchId.value = null;
+    await loadAll();
+  } catch (err) {
+    matchTeamsError.value = err.response?.data?.error || 'Не удалось изменить команды';
+  } finally {
+    savingMatchTeams.value = false;
+  }
+}
 
 // Match creation
 const newMatch = ref({ team_a_id: '', team_b_id: '', map: '', best_of: 1, round_number: '' });
@@ -385,10 +450,11 @@ async function submitTeam() {
   try {
     await apiClient.post(`/tournaments/${tournamentId}/teams`, {
       name: newTeam.value.name,
+      captain_name: newTeam.value.captain_name,
       tag: newTeam.value.tag,
       player_ids: selectedPlayerIds.value,
     });
-    newTeam.value = { name: '', tag: '' };
+    newTeam.value = { name: '', captain_name: '', tag: '' };
     selectedPlayerIds.value = [];
     await loadAll();
   } catch (e) {
@@ -679,17 +745,34 @@ async function uploadDemo(matchId, e) {
       <h2>Команды</h2>
       <div class="form-inline">
         <input v-model="newTeam.name" type="text" placeholder="Название команды" />
-        <input v-model="newTeam.tag" type="text" placeholder="Тег" style="width: 100px" />
+        <input v-model="newTeam.captain_name" type="text" placeholder="Ник капитана в CS2" />
+        <input v-model="newTeam.tag" type="text" placeholder="Тег (необязательно)" style="width: 180px" />
         <button class="btn btn-primary" :disabled="!newTeam.name || creatingTeam" @click="submitTeam">
           {{ creatingTeam ? 'Создаём…' : `Создать (${selectedPlayerIds.length} выбрано)` }}
         </button>
       </div>
       <p v-if="teamError" class="delta-negative">{{ teamError }}</p>
+      <p class="text-muted hint">Ник капитана используется для привязки команды при загрузке демо. Укажите его точно как в игре.</p>
 
       <div class="teams-list">
         <div v-for="team in tournament.teams" :key="team.id" class="card team-chip">
           <strong>{{ team.name }}</strong>
+          <span v-if="team.captain_name" class="text-muted">Капитан: {{ team.captain_name }}</span>
+          <button class="btn" :disabled="savingCaptain" @click="editCaptain(team)">
+            {{ team.captain_name ? 'Изменить ник капитана' : 'Указать ник капитана' }}
+          </button>
+          <form v-if="editingCaptainTeamId === team.id" class="captain-name-editor" @submit.prevent="saveCaptain">
+            <label>Ник капитана в CS2
+              <input v-model="captainNameInput" maxlength="128" :disabled="savingCaptain" placeholder="Точно как в демо" />
+            </label>
+            <button class="btn btn-primary" :disabled="savingCaptain">{{ savingCaptain ? 'Сохраняем…' : 'Сохранить' }}</button>
+            <button type="button" class="btn" :disabled="savingCaptain" @click="editingCaptainTeamId = null">Отмена</button>
+            <p v-if="captainError" class="delta-negative" role="alert">{{ captainError }}</p>
+          </form>
           <span class="text-muted mono">{{ team.players.length }} игроков</span>
+          <button class="btn btn-danger" :disabled="deletingTeamId !== null" @click="deleteTeam(team)">
+            {{ deletingTeamId === team.id ? 'Удаляем…' : 'Удалить команду' }}
+          </button>
         </div>
       </div>
     </section>
@@ -726,6 +809,25 @@ async function uploadDemo(matchId, e) {
             {{ m.team_a_name || 'TBD' }} vs {{ m.team_b_name || 'TBD' }}
           </RouterLink>
           <StatusBadge :status="m.status" />
+          <button class="btn" :disabled="m.status === 'parsing_demo' || savingMatchTeams" @click="editMatchTeams(m)">Изменить команды</button>
+          <div v-if="editingMatchId === m.id" class="match-team-editor">
+            <label>Команда A
+              <select v-model="matchTeams.team_a_id" :disabled="savingMatchTeams">
+                <option disabled value="">Выберите команду</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }}</option>
+              </select>
+            </label>
+            <label>Команда B
+              <select v-model="matchTeams.team_b_id" :disabled="savingMatchTeams">
+                <option disabled value="">Выберите команду</option>
+                <option v-for="team in tournament.teams" :key="team.id" :value="team.id">{{ team.name }}</option>
+              </select>
+            </label>
+            <button class="btn btn-primary" :disabled="savingMatchTeams || !matchTeams.team_a_id || !matchTeams.team_b_id || matchTeams.team_a_id === matchTeams.team_b_id" @click="saveMatchTeams">{{ savingMatchTeams ? 'Сохраняем…' : 'Сохранить' }}</button>
+            <button class="btn" :disabled="savingMatchTeams" @click="editingMatchId = null">Отмена</button>
+            <p class="text-muted">Счёт и статистика остаются на своих сторонах A и B.</p>
+            <p v-if="matchTeamsError" class="delta-negative">{{ matchTeamsError }}</p>
+          </div>
           <select
             class="stage-select"
             :value="currentStage(m)"
@@ -765,6 +867,26 @@ async function uploadDemo(matchId, e) {
 </template>
 
 <style scoped>
+.captain-name-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  width: 100%;
+}
+.captain-name-editor label { display: grid; gap: 6px; }
+.captain-name-editor p { flex-basis: 100%; }
+.match-team-editor {
+  grid-column: 1 / -1;
+  flex-basis: 100%;
+  order: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.match-team-editor label { display: grid; gap: 6px; }
+.match-team-editor p { flex-basis: 100%; }
 .page-head {
   display: flex;
   justify-content: space-between;
@@ -1052,8 +1174,8 @@ async function uploadDemo(matchId, e) {
 }
 
 .match-manage-row {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   align-items: center;
 }
@@ -1063,6 +1185,8 @@ async function uploadDemo(matchId, e) {
 }
 
 .match-manage-row__name {
+  flex: 1;
+  min-width: 140px;
   font-weight: 600;
 }
 
@@ -1091,6 +1215,7 @@ async function uploadDemo(matchId, e) {
   }
 
   .match-manage-row {
+    display: grid;
     grid-template-columns: 1fr;
     justify-items: start;
     row-gap: 8px;

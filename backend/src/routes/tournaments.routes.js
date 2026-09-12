@@ -367,13 +367,16 @@ router.put('/:id/sheet-source', requireAdmin, async (req, res) => {
 // POST /api/tournaments/:id/teams — создать команду в турнире
 router.post('/:id/teams', requireAdmin, async (req, res) => {
   try {
-    const { name, tag, player_ids = [] } = req.body;
+    const { name, tag, captain_name, player_ids = [] } = req.body;
     if (!name) return res.status(400).json({ success: false, error: 'Укажите название команды' });
+    if (captain_name != null && (typeof captain_name !== 'string' || captain_name.length > 128)) {
+      return res.status(400).json({ success: false, error: 'Ник капитана должен быть строкой до 128 символов' });
+    }
 
     const result = await withTransaction(async (tx) => {
       const { rows: teamRows } = await tx.query(
-        `INSERT INTO teams (tournament_id, name, tag) VALUES ($1, $2, $3) RETURNING *`,
-        [req.params.id, name, tag || null]
+        `INSERT INTO teams (tournament_id, name, tag, captain_name) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [req.params.id, name, tag || null, captain_name?.trim() || null]
       );
       const team = teamRows[0];
 
@@ -388,7 +391,50 @@ router.post('/:id/teams', requireAdmin, async (req, res) => {
 
     res.status(201).json({ success: true, data: result });
   } catch (err) {
+    if (err.constraint === 'teams_tournament_captain_name_unique') {
+      return res.status(409).json({ success: false, error: 'Команда с таким ником капитана уже есть в турнире' });
+    }
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.put('/:id/teams/:teamId/captain', requireAdmin, async (req, res) => {
+  const { captain_name } = req.body;
+  if (typeof captain_name !== 'string' || captain_name.length > 128) {
+    return res.status(400).json({ success: false, error: 'Ник капитана должен быть строкой до 128 символов' });
+  }
+  try {
+    const { rows } = await query(
+      'UPDATE teams SET captain_name = $1 WHERE id = $2 AND tournament_id = $3 RETURNING *',
+      [captain_name.trim() || null, req.params.teamId, req.params.id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Команда не найдена' });
+    res.json({ success: true, data: rows[0] });
+  } catch (err) {
+    if (err.constraint === 'teams_tournament_captain_name_unique') {
+      return res.status(409).json({ success: false, error: 'Команда с таким ником капитана уже есть в турнире' });
+    }
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.delete('/:id/teams/:teamId', requireAdmin, async (req, res) => {
+  try {
+    await withTransaction(async (tx) => {
+      const { rows } = await tx.query('SELECT id FROM teams WHERE id = $1 AND tournament_id = $2 FOR UPDATE',
+        [req.params.teamId, req.params.id]);
+      if (!rows.length) throw Object.assign(new Error('Команда не найдена'), { statusCode: 404 });
+      const { rows: links } = await tx.query(
+        `SELECT 1 FROM matches WHERE team_a_id = $1 OR team_b_id = $1
+         UNION ALL SELECT 1 FROM match_player_stats WHERE team_id = $1
+         UNION ALL SELECT 1 FROM draft_teams WHERE team_id = $1
+         UNION ALL SELECT 1 FROM draft_picks WHERE team_id = $1 LIMIT 1`, [req.params.teamId]);
+      if (links.length) throw Object.assign(new Error('Команда используется в матчах или драфте. Сначала замените её в матчах или сбросьте связанный драфт.'), { statusCode: 409 });
+      await tx.query('DELETE FROM teams WHERE id = $1', [req.params.teamId]);
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(err.statusCode || (err.code === '23503' ? 409 : 500)).json({ success: false, error: err.code === '23503' ? 'Команда используется. Обновите страницу и проверьте её связи.' : err.message });
   }
 });
 
