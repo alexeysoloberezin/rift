@@ -61,7 +61,7 @@ export async function getDraftBoard(tournamentId) {
 
   const teamIds = draftTeams.map((t) => t.team_id);
   const { rows: available } = await query(
-    `SELECT p.id, p.nickname, p.avatar_url, tp.seed_rating
+    `SELECT p.id, p.nickname, p.avatar_url, p.faceit_link, tp.seed_rating
      FROM tournament_players tp
      JOIN players p ON p.id = tp.player_id
      WHERE tp.tournament_id = $1

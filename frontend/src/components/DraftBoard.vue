@@ -15,6 +15,19 @@ const props = defineProps({
 const emit = defineEmits(['pick']);
 
 const isFinished = computed(() => props.data.status === 'finished');
+
+function faceitUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const link = value.trim();
+    const url = new URL(/^https?:\/\//i.test(link) ? link : `https://${link}`);
+    if (!['faceit.com', 'www.faceit.com'].includes(url.hostname.toLowerCase()) || url.username || url.password) return null;
+    url.protocol = 'https:';
+    return url.href;
+  } catch {
+    return null;
+  }
+}
 </script>
 
 <template>
@@ -73,6 +86,9 @@ const isFinished = computed(() => props.data.status === 'finished');
           <PlayerAvatar :nickname="p.nickname" :size="24" />
           <span>{{ p.nickname }}</span>
           <span class="mono text-muted">{{ p.seed_rating != null ? Number(p.seed_rating).toFixed(0) : '—' }}</span>
+          <a v-if="faceitUrl(p.faceit_link)" :href="faceitUrl(p.faceit_link)" class="faceit-link"
+            target="_blank" rel="noopener noreferrer" :aria-label="`FACEIT: ${p.nickname}`" @click.stop>FACEIT ↗</a>
+          <span v-else class="text-muted" aria-label="Профиль FACEIT не указан">—</span>
           <button v-if="canPick" class="btn btn-primary pick-btn" type="button" :disabled="picking">
             {{ picking ? '…' : 'Выбрать' }}
           </button>
@@ -105,8 +121,16 @@ const isFinished = computed(() => props.data.status === 'finished');
 
 .teams-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .teams-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  .teams-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 .team-block {
@@ -176,9 +200,17 @@ const isFinished = computed(() => props.data.status === 'finished');
 }
 
 .pool-row {
-  grid-template-columns: 24px 1fr 70px auto;
+  grid-template-columns: 24px minmax(0, 1fr) 70px auto auto;
   gap: 10px;
   border-bottom: 1px solid var(--line);
+}
+
+.faceit-link { color: var(--gold); font-size: 12px; white-space: nowrap; }
+.faceit-link:hover { text-decoration: underline; }
+.pool-row > :nth-child(2) { overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .pool-row { grid-template-columns: 24px minmax(0, 1fr) 45px auto; gap: 6px; }
+  .pick-btn { grid-column: 2 / -1; justify-self: end; }
 }
 
 .pool-table > *:last-child {
