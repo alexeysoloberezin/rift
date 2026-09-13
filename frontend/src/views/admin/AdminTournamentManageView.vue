@@ -269,6 +269,18 @@ async function removeScreenshot(match) {
   finally { screenshotBusy.value = null; }
 }
 const uploadError = ref('');
+const detachingMatchId = ref(null);
+const detachMessage = ref('');
+async function detachDemos(match) {
+  if (!window.confirm('Отвязать все демо этого матча и сбросить статистику игроков? Файлы сохранятся в списке загруженных демо. Ручной счёт и скриншот останутся.')) return;
+  detachingMatchId.value = match.id; uploadError.value = ''; detachMessage.value = '';
+  try {
+    await apiClient.post('/matches/' + match.id + '/demos/detach');
+    await loadAll();
+    detachMessage.value = 'Статистика сброшена. Файлы доступны в списке загруженных демо.';
+  } catch (err) { uploadError.value = err.response?.data?.error || 'Не удалось отвязать демо'; }
+  finally { detachingMatchId.value = null; }
+}
 const availableDemos = ref([]);
 const selectedDemos = ref({});
 async function refreshDemos() {
@@ -993,6 +1005,7 @@ async function uploadDemo(matchId, e) {
           </label>
           <a v-if="m.screenshot_version" :href="screenshotUrl(m)" target="_blank" rel="noopener" class="btn">Посмотреть скрин</a>
           <button v-if="m.screenshot_version" class="btn" :disabled="screenshotBusy !== null" @click="removeScreenshot(m)">Убрать скрин</button>
+          <button class="btn" :disabled="detachingMatchId !== null || uploadingMatchId !== null || m.status === 'parsing_demo'" @click="detachDemos(m)">{{ detachingMatchId === m.id ? 'Сбрасываем…' : 'Отвязать демо и сбросить стату' }}</button>
           <label class="btn upload-btn">
             {{ uploadingMatchId === m.id ? 'Загрузка…' : 'Загрузить .dem / .csv' }}
             <input type="file" accept=".dem,.csv" hidden @change="(e) => uploadDemo(m.id, e)" />
@@ -1008,6 +1021,7 @@ async function uploadDemo(matchId, e) {
         <p v-if="tournament.matches.length === 0" class="text-muted" style="padding: 16px">Матчей ещё нет.</p>
       </div>
       <p v-if="screenshotError" class="delta-negative" role="alert">{{ screenshotError }}</p>
+      <p v-if="detachMessage" class="text-muted" role="status">{{ detachMessage }}</p>
       <p v-if="uploadError" class="delta-negative">{{ uploadError }}</p>
       <p v-if="deleteError" class="delta-negative">{{ deleteError }}</p>
       <p v-if="stageError" class="delta-negative">{{ stageError }}</p>

@@ -1,4 +1,5 @@
 import { parseCsvFile } from '../services/csvDemo.service.js';
+import { detachMatchDemos } from '../services/detachDemos.service.js';
 import { Router } from 'express';
 import multer from 'multer';
 import fs from 'node:fs';
@@ -13,6 +14,15 @@ const withTransaction = deps.withTransaction || defaultTransaction;
 const processDemo = deps.processDemo || defaultProcessDemo;
 const requireAdmin = deps.requireAdmin || defaultRequireAdmin;
 const router = Router();
+
+router.post('/matches/:matchId/demos/detach', requireAdmin, async (req, res) => {
+  try {
+    const demos = await withTransaction(tx => detachMatchDemos(tx, req.params.matchId));
+    res.json({ success: true, data: demos, message: 'Демо отвязаны, статистика сброшена. Файлы сохранены.' });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: err.message });
+  }
+});
 
 router.get('/tournaments/:tournamentId/demos', requireAdmin, async (req, res) => {
   try {
@@ -81,21 +91,16 @@ router.post('/matches/:matchId/demo', requireAdmin, upload.single('demo'), async
       catch (err) { throw Object.assign(err, { status: 400 }); }
     }
     const { matchId } = req.params;
-    const { rows: matchRows } = await query('SELECT id, status FROM matches WHERE id = $1', [matchId]);
-    if (matchRows.length === 0) {
-      fs.unlink(req.file.path, () => {});
-      return res.status(404).json({ success: false, error: 'Матч не найден' });
-    }
-
-    const { rows } = await query(
-      `INSERT INTO demos (match_id, original_name, storage_path, status)
-       VALUES ($1, $2, $3, 'pending') RETURNING *`,
-      [matchId, req.file.originalname, req.file.path]
-    );
-    const demo = rows[0];
-
-    await query('UPDATE matches SET status = $1 WHERE id = $2', ['parsing_demo', matchId]);
-    await query('UPDATE demos SET status = $1 WHERE id = $2', ['parsing', demo.id]);
+    const { demo, previousStatus } = await withTransaction(async tx => {
+      const { rows: matchRows } = await tx.query('SELECT id, tournament_id, status FROM matches WHERE id = $1 FOR UPDATE', [matchId]);
+      if (!matchRows.length) throw Object.assign(new Error('Матч не найден'), { status: 404 });
+      if (matchRows[0].status === 'parsing_demo') throw Object.assign(new Error('Дождитесь обработки текущего демо'), { status: 409 });
+      const { rows } = await tx.query(
+        "INSERT INTO demos (match_id, tournament_id, original_name, storage_path, status) VALUES ($1, $2, $3, $4, 'parsing') RETURNING *",
+        [matchId, matchRows[0].tournament_id, req.file.originalname, req.file.path]);
+      await tx.query('UPDATE matches SET status = $1 WHERE id = $2', ['parsing_demo', matchId]);
+      return { demo: rows[0], previousStatus: matchRows[0].status };
+    });
 
     // Парсинг демки может занимать минуты — отвечаем сразу, обработка идёт в фоне.
     // Клиент опрашивает GET /api/demos/:id для отслеживания статуса.
@@ -104,11 +109,11 @@ router.post('/matches/:matchId/demo', requireAdmin, upload.single('demo'), async
     processDemo(demo.id, matchId, req.file.path).catch(async (err) => {
       console.error('❌ Ошибка обработки демки:', err.message);
       await query('UPDATE demos SET status = $1, error_message = $2 WHERE id = $3', ['error', err.message, demo.id]).catch(() => {});
-      await query('UPDATE matches SET status = $1 WHERE id = $2', [matchRows[0].status || 'needs_demo', matchId]).catch(() => {});
+      await query('UPDATE matches SET status = $1 WHERE id = $2', [previousStatus || 'needs_demo', matchId]).catch(() => {});
     });
   } catch (err) {
     console.error(err);
-    if (err.status === 400 && req.file) await fs.promises.unlink(req.file.path).catch(() => {});
+    if (req.file) await fs.promises.unlink(req.file.path).catch(() => {});
     res.status(err.status || 500).json({ success: false, error: err.message });
   }
 });
