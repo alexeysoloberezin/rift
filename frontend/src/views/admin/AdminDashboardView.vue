@@ -23,6 +23,7 @@ onMounted(async () => {
         <p class="text-muted">Добро пожаловать, {{ auth.admin?.name }}</p>
         <h1>Админ-панель</h1>
       </div>
+      <RouterLink to="/admin/map-veto" class="btn">Пики карт</RouterLink>
       <RouterLink to="/admin/tournaments/new" class="btn btn-primary">+ Новый турнир</RouterLink>
     </div>
 

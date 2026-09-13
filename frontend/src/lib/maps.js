@@ -5,6 +5,7 @@
 // матчей читался как в FACEIT — с картинкой карты, а не голым текстом.
 
 export const MAPS = {
+  cache: { label: 'Cache', short: 'CCH', color: '#819d67', glyph: 'tower' },
   dust2: { label: 'Dust II', short: 'D2', color: '#caa46b', glyph: 'sun' },
   mirage: { label: 'Mirage', short: 'MRG', color: '#d9b563', glyph: 'arch' },
   inferno: { label: 'Inferno', short: 'INF', color: '#c9622f', glyph: 'flame' },

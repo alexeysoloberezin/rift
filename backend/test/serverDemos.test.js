@@ -20,7 +20,7 @@ test('server demo upload HTTP contract', async (t) => {
       if (fail) throw new Error('Database unavailable');
       if (sql.startsWith('SELECT')) return { rows: exists ? [{ id: params[0] }] : [] };
       if (sql.includes('INSERT INTO matches')) return { rows: [{ id: 'match-id' }] };
-      return { rows: [{ id: 'demo-id', match_id: 'match-id', status: 'parsing' }] };
+      return { rows: [{ id: 'demo-id', match_id: null, status: 'pending' }] };
     } }),
     processDemo: async (...args) => { parsed.push(args); },
   }));
@@ -56,9 +56,10 @@ test('server demo upload HTTP contract', async (t) => {
   assert.equal(response.status, 202);
   const result = await response.json();
   assert.equal(result.data.tournament_id, id);
-  assert.equal(result.data.match_id, 'match-id');
-  assert.equal(result.data.status, 'parsing');
-  assert.equal(parsed.length, 1);
+  assert.equal(result.data.match_id, null);
+  assert.equal(result.data.status, 'pending');
+  assert.equal(parsed.length, 0);
   assert.equal((await readdir(directory)).length, 1);
-  assert.ok(calls.some(({ sql, params }) => sql.includes('INSERT INTO matches') && params[0] === id));
+  assert.ok(!calls.some(({ sql }) => sql.includes('INSERT INTO matches')));
+  assert.ok(calls.some(({ sql, params }) => sql.includes('INSERT INTO demos') && params[0] === id));
 });

@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
 const routes = [
+  { path: '/admin/map-veto', component: () => import('../views/admin/AdminMapVetoView.vue'), meta: { requiresAuth: true } },
+  { path: '/map-veto/:token', component: () => import('../views/MapVetoView.vue') },
   { path: '/', name: 'home', component: () => import('../views/HomeView.vue') },
   { path: '/tournaments', name: 'tournaments', component: () => import('../views/TournamentsListView.vue') },
   { path: '/tournaments/:id', name: 'tournament-detail', component: () => import('../views/TournamentDetailView.vue') },

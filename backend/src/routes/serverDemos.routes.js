@@ -3,14 +3,14 @@ import multer from 'multer';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { query, withTransaction } from '../config/db.js';
-import { processDemo } from '../services/matchProcessing.service.js';
+import { withTransaction } from '../config/db.js';
+
 
 // Dependencies can be replaced in HTTP tests without a live database/parser.
 export function createServerDemosRouter(deps = {}) {
-  const dbQuery = deps.query || query;
+
   const transaction = deps.withTransaction || withTransaction;
-  const process = deps.processDemo || processDemo;
+
   const getKey = deps.getKey || (() => globalThis.process.env.CS2_DEMO_API_KEY);
   const directory = deps.directory || path.join(globalThis.process.env.UPLOADS_DIR || './uploads', 'demos');
   const router = Router();
@@ -57,19 +57,12 @@ export function createServerDemosRouter(deps = {}) {
       const demo = await transaction(async (tx) => {
         const { rows: tournaments } = await tx.query('SELECT id FROM tournaments WHERE id = $1 FOR KEY SHARE', [id]);
         if (!tournaments.length) throw Object.assign(new Error('Турнир не найден'), { status: 404 });
-        const { rows: matches } = await tx.query(
-          "INSERT INTO matches (tournament_id, status) VALUES ($1, 'parsing_demo') RETURNING id", [id]);
         const { rows } = await tx.query(
-          "INSERT INTO demos (match_id, original_name, storage_path, status) VALUES ($1, $2, $3, 'parsing') RETURNING id, match_id, original_name, status, uploaded_at",
-          [matches[0].id, req.file.originalname, req.file.path]);
+          "INSERT INTO demos (tournament_id, original_name, storage_path, status) VALUES ($1, $2, $3, 'pending') RETURNING id, match_id, original_name, status, uploaded_at",
+          [id, req.file.originalname, req.file.path]);
         return rows[0];
       });
-      res.status(202).json({ success: true, data: { ...demo, tournament_id: id }, message: 'Демка принята, парсинг запущен' });
-      Promise.resolve().then(() => process(demo.id, demo.match_id, req.file.path)).catch(async (err) => {
-        console.error('Ошибка обработки серверной демки:', err.message);
-        await dbQuery('UPDATE demos SET status = $1, error_message = $2 WHERE id = $3', ['error', err.message, demo.id]).catch(() => {});
-        await dbQuery('UPDATE matches SET status = $1 WHERE id = $2', ['needs_demo', demo.match_id]).catch(() => {});
-      });
+      res.status(202).json({ success: true, data: { ...demo, tournament_id: id }, message: 'Демо загружено. Выберите его в нужном матче для обработки.' });
     } catch (err) {
       if (req.file) await fs.promises.unlink(req.file.path).catch(() => {});
       if (!err.status) console.error('Ошибка загрузки серверной демки:', err);

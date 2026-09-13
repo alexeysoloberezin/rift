@@ -224,6 +224,23 @@ const sameTeamSelected = computed(
 // Demo upload per match
 const uploadingMatchId = ref(null);
 const uploadError = ref('');
+const availableDemos = ref([]);
+const selectedDemos = ref({});
+async function refreshDemos() {
+  const { data } = await apiClient.get('/tournaments/' + tournamentId + '/demos');
+  availableDemos.value = data.data;
+}
+async function attachDemo(matchId) {
+  uploadingMatchId.value = matchId;
+  uploadError.value = '';
+  try {
+    await apiClient.post('/matches/' + matchId + '/demo/attach', { demo_id: selectedDemos.value[matchId] });
+    selectedDemos.value[matchId] = '';
+    await loadAll();
+  } catch (err) {
+    uploadError.value = err.response?.data?.error || 'Не удалось привязать демо';
+  } finally { uploadingMatchId.value = null; }
+}
 
 // Привязка уже созданного матча к этапу турнира (группа/полуфинал/финал) —
 // делается отдельно от создания матча, см. matches.routes.js PUT /matches/:id/stage.
@@ -283,7 +300,7 @@ async function loadAll() {
     registeredPlayers.value = pData.data;
     groups.value = gData.data;
     bracketSlots.value = bData.data;
-    await loadDraft();
+    await Promise.all([loadDraft(), refreshDemos()]);
     loading.value = false;
 
     // Форму источника заполняем только один раз при первой загрузке — иначе
@@ -844,6 +861,8 @@ async function uploadDemo(matchId, e) {
 
     <section class="card block">
       <h2>Матчи</h2>
+      <p class="text-muted hint">Создайте матч, затем выберите загруженное демо. Загрузка через API сохраняет файл без создания матча. Статистика рассчитывается после привязки.</p>
+      <button class="btn" @click="refreshDemos().catch(() => uploadError = 'Не удалось обновить список демо')">Обновить список демо ({{ availableDemos.length }})</button>
       <div class="form-grid">
         <select v-model="newMatch.team_a_id">
           <option value="">Команда A</option>
@@ -909,6 +928,11 @@ async function uploadDemo(matchId, e) {
               </option>
             </optgroup>
           </select>
+          <select :value="selectedDemos[m.id] || ''" @change="selectedDemos[m.id] = $event.target.value" aria-label="Загруженное демо" :disabled="uploadingMatchId !== null || m.status === 'parsing_demo'">
+            <option value="" disabled>Выберите загруженное демо</option>
+            <option v-for="demo in availableDemos" :key="demo.id" :value="demo.id">{{ demo.original_name }} · {{ new Date(demo.uploaded_at).toLocaleString('ru-RU') }}</option>
+          </select>
+          <button class="btn btn-primary" :disabled="!selectedDemos[m.id] || uploadingMatchId !== null || m.status === 'parsing_demo'" @click="attachDemo(m.id)">Привязать демо</button>
           <label class="btn upload-btn">
             {{ uploadingMatchId === m.id ? 'Загрузка…' : 'Загрузить .dem' }}
             <input type="file" accept=".dem" hidden @change="(e) => uploadDemo(m.id, e)" />
