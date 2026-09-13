@@ -213,6 +213,29 @@ async function saveMatchTeams() {
   }
 }
 
+const editingResult = ref(null);
+const resultForm = ref({ map: '', score_a: '', score_b: '' });
+const savingResult = ref(false);
+const resultError = ref('');
+function editResult(match) {
+  editingResult.value = match.id;
+  resultForm.value = { map: match.map || '', score_a: match.score_a ?? '', score_b: match.score_b ?? '' };
+  resultError.value = '';
+}
+async function saveResult() {
+  savingResult.value = true; resultError.value = '';
+  try {
+    await apiClient.put('/matches/' + editingResult.value, {
+      map: resultForm.value.map || null,
+      score_a: resultForm.value.score_a === '' ? null : Number(resultForm.value.score_a),
+      score_b: resultForm.value.score_b === '' ? null : Number(resultForm.value.score_b),
+    });
+    editingResult.value = null;
+    await loadAll();
+  } catch (err) { resultError.value = err.response?.data?.error || 'Не удалось сохранить результат'; }
+  finally { savingResult.value = false; }
+}
+
 // Match creation
 const newMatch = ref({ team_a_id: '', team_b_id: '', map: '', best_of: 1, round_number: '' });
 const matchError = ref('');
@@ -223,6 +246,28 @@ const sameTeamSelected = computed(
 
 // Demo upload per match
 const uploadingMatchId = ref(null);
+const screenshotBusy = ref(null);
+const screenshotError = ref('');
+const screenshotUrl = match => apiClient.defaults.baseURL.replace(/\/$/, '') + '/matches/' + match.id + '/screenshot?v=' + encodeURIComponent(match.screenshot_version || '');
+async function uploadScreenshot(match, event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  screenshotError.value = '';
+  if (file.size > 10 * 1024 * 1024) { screenshotError.value = 'Скриншот должен быть не больше 10 МБ'; event.target.value = ''; return; }
+  screenshotBusy.value = match.id;
+  try {
+    const body = new FormData(); body.append('screenshot', file);
+    await apiClient.post('/matches/' + match.id + '/screenshot', body);
+    await loadAll();
+  } catch (err) { screenshotError.value = err.response?.data?.error || 'Не удалось загрузить скриншот'; }
+  finally { screenshotBusy.value = null; event.target.value = ''; }
+}
+async function removeScreenshot(match) {
+  screenshotBusy.value = match.id; screenshotError.value = '';
+  try { await apiClient.delete('/matches/' + match.id + '/screenshot'); await loadAll(); }
+  catch (err) { screenshotError.value = err.response?.data?.error || 'Не удалось убрать скриншот'; }
+  finally { screenshotBusy.value = null; }
+}
 const uploadError = ref('');
 const availableDemos = ref([]);
 const selectedDemos = ref({});
@@ -893,6 +938,15 @@ async function uploadDemo(matchId, e) {
             {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> vs {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" />
           </RouterLink>
           <StatusBadge :status="m.status" />
+          <button class="btn" :disabled="m.status === 'parsing_demo'" @click="editResult(m)">Карта и счёт</button>
+          <form v-if="editingResult === m.id" class="match-team-editor" @submit.prevent="saveResult">
+            <label>Карта<input v-model="resultForm.map" placeholder="de_mirage" /></label>
+            <label>Счёт {{ m.team_a_name || 'команды A' }}<input v-model="resultForm.score_a" type="number" min="0" max="1000" step="1" /></label>
+            <label>Счёт {{ m.team_b_name || 'команды B' }}<input v-model="resultForm.score_b" type="number" min="0" max="1000" step="1" /></label>
+            <button class="btn btn-primary" :disabled="savingResult">Сохранить</button>
+            <button class="btn" type="button" :disabled="savingResult" @click="editingResult = null">Отмена</button>
+            <p v-if="resultError" class="delta-negative">{{ resultError }}</p>
+          </form>
           <button class="btn" :disabled="m.status === 'parsing_demo' || savingMatchTeams" @click="editMatchTeams(m)">Изменить команды</button>
           <div v-if="editingMatchId === m.id" class="match-team-editor">
             <label>Команда A
@@ -934,8 +988,14 @@ async function uploadDemo(matchId, e) {
           </select>
           <button class="btn btn-primary" :disabled="!selectedDemos[m.id] || uploadingMatchId !== null || m.status === 'parsing_demo'" @click="attachDemo(m.id)">Привязать демо</button>
           <label class="btn upload-btn">
-            {{ uploadingMatchId === m.id ? 'Загрузка…' : 'Загрузить .dem' }}
-            <input type="file" accept=".dem" hidden @change="(e) => uploadDemo(m.id, e)" />
+            {{ screenshotBusy === m.id ? 'Загрузка…' : m.screenshot_version ? 'Заменить скрин статистики' : 'Загрузить скрин статистики' }}
+            <input type="file" accept="image/png,image/jpeg,image/webp" :disabled="screenshotBusy !== null" hidden @change="uploadScreenshot(m, $event)" />
+          </label>
+          <a v-if="m.screenshot_version" :href="screenshotUrl(m)" target="_blank" rel="noopener" class="btn">Посмотреть скрин</a>
+          <button v-if="m.screenshot_version" class="btn" :disabled="screenshotBusy !== null" @click="removeScreenshot(m)">Убрать скрин</button>
+          <label class="btn upload-btn">
+            {{ uploadingMatchId === m.id ? 'Загрузка…' : 'Загрузить .dem / .csv' }}
+            <input type="file" accept=".dem,.csv" hidden @change="(e) => uploadDemo(m.id, e)" />
           </label>
           <button
             class="btn btn-danger"
@@ -947,6 +1007,7 @@ async function uploadDemo(matchId, e) {
         </div>
         <p v-if="tournament.matches.length === 0" class="text-muted" style="padding: 16px">Матчей ещё нет.</p>
       </div>
+      <p v-if="screenshotError" class="delta-negative" role="alert">{{ screenshotError }}</p>
       <p v-if="uploadError" class="delta-negative">{{ uploadError }}</p>
       <p v-if="deleteError" class="delta-negative">{{ deleteError }}</p>
       <p v-if="stageError" class="delta-negative">{{ stageError }}</p>

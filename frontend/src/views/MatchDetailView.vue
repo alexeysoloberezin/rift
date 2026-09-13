@@ -11,6 +11,7 @@ import PlayerAvatar from '../components/PlayerAvatar.vue';
 const route = useRoute();
 const match = ref(null);
 const loading = ref(true);
+const screenshotUrl = computed(() => match.value?.screenshot_version ? apiClient.defaults.baseURL.replace(/\/$/, '') + '/matches/' + match.value.id + '/screenshot?v=' + encodeURIComponent(match.value.screenshot_version) : null);
 let pollTimer = null;
 
 async function load() {
@@ -56,7 +57,8 @@ const playerExtraBySteamId = computed(() => {
 });
 
 function extraFor(stat) {
-  return stat.steam_id64 ? playerExtraBySteamId.value.get(stat.steam_id64) : null;
+  return (stat.steam_id64 ? playerExtraBySteamId.value.get(stat.steam_id64) : null)
+    || parsedDemo.value?.players?.find(p => p.nickname.toLowerCase() === stat.nickname.toLowerCase()) || null;
 }
 
 function topWeapon(extra) {
@@ -158,7 +160,11 @@ function teamNameForSide(side) {
       </div>
     </div>
 
-    <div class="stat-tables">
+    <p v-if="!screenshotUrl && parsedDemo?.source === 'csv'" class="text-muted">Статистика из CSV. Неизвестные показатели отмечены прочерком. ADR и рейтинг скрина показываются только при наличии в CSV; рейтинг RIFT не рассчитывается, Elo не изменяется. Карта и счёт задаются организатором отдельно.</p>
+    <a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="stats-screenshot" aria-label="Открыть скриншот статистики в полном размере">
+      <img :src="screenshotUrl" alt="Статистика матча" />
+    </a>
+    <div v-else class="stat-tables">
       <div v-for="(teamStats, idx) in [teamAStats, teamBStats]" :key="idx" class="card stat-table">
         <div class="stat-table-scroll">
           <div class="stat-table__head mono text-muted">
@@ -166,7 +172,7 @@ function teamNameForSide(side) {
             <span>K-D-A</span>
             <span>ADR</span>
             <span>KAST</span>
-            <span>Рейтинг</span>
+            <span>{{ parsedDemo?.csv_format === 'screenshot' ? 'Рейтинг скрина' : 'Рейтинг' }}</span>
             <span>Эло</span>
             <span>Утил. дмг</span>
             <span>Топ оружие</span>
@@ -182,10 +188,10 @@ function teamNameForSide(side) {
               {{ s.nickname }}
             </span>
             <span class="mono">{{ s.kills }}-{{ s.deaths }}-{{ s.assists }}</span>
-            <span class="mono">{{ Number(s.adr || 0).toFixed(0) }}</span>
-            <span class="mono">{{ Number(s.kast_pct || 0).toFixed(0) }}%</span>
-            <span class="mono">{{ Number(s.match_rating || 0).toFixed(2) }}</span>
-            <RatingDelta :value="s.elo_change" />
+            <span class="mono">{{ s.adr == null ? '—' : Number(s.adr).toFixed(0) }}</span>
+            <span class="mono">{{ s.kast_pct == null ? '—' : Number(s.kast_pct).toFixed(0) + '%' }}</span>
+            <span class="mono">{{ parsedDemo?.csv_format === 'screenshot' ? (extraFor(s)?.source_rating == null ? '—' : Number(extraFor(s).source_rating).toFixed(2)) : (s.match_rating == null ? '—' : Number(s.match_rating).toFixed(2)) }}</span>
+            <RatingDelta v-if="s.elo_change != null" :value="s.elo_change" /><span v-else class="text-muted">—</span>
             <span class="mono text-muted">{{ extraFor(s)?.utility_damage ?? '—' }}</span>
             <span class="text-muted">{{ topWeapon(extraFor(s)) || '—' }}</span>
           </RouterLink>
@@ -258,6 +264,8 @@ function teamNameForSide(side) {
 </template>
 
 <style scoped>
+.stats-screenshot { display: block; width: 100%; margin: 24px 0; }
+.stats-screenshot img { display: block; width: 100%; height: auto; border-radius: var(--radius); }
 /* Эта страница даёт таблице составов и раундов больше воздуха, чем обычный
    .container (1160px) — со всеми новыми колонками (оружие/утилита/закупка/
    клатч) им реально нужно больше ширины на нормальном мониторе клуба.

@@ -1,3 +1,4 @@
+import { parseCsvFile } from '../services/csvDemo.service.js';
 import { Router } from 'express';
 import multer from 'multer';
 import fs from 'node:fs';
@@ -19,12 +20,12 @@ export function createServerDemosRouter(deps = {}) {
       destination(req, file, cb) {
         fs.mkdir(directory, { recursive: true }, (err) => cb(err, directory));
       },
-      filename: (req, file, cb) => cb(null, `${randomUUID()}.dem`),
+      filename: (req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname).toLowerCase()}`),
     }),
     limits: { fileSize: 2 * 1024 * 1024 * 1024, files: 1, fields: 1, fieldSize: 128 },
     fileFilter(req, file, cb) {
-      if (path.extname(file.originalname).toLowerCase() !== '.dem') {
-        return cb(Object.assign(new Error('Допускаются только файлы .dem'), { status: 400 }));
+      if (!['.dem', '.csv'].includes(path.extname(file.originalname).toLowerCase())) {
+        return cb(Object.assign(new Error('Допускаются только файлы .dem или .csv'), { status: 400 }));
       }
       cb(null, true);
     },
@@ -52,7 +53,11 @@ export function createServerDemosRouter(deps = {}) {
         throw Object.assign(new Error('Укажите tournament_id в формате UUID'), { status: 400 });
       }
       if (!req.file || req.file.size === 0) {
-        throw Object.assign(new Error('Передайте непустой файл .dem в поле demo'), { status: 400 });
+        throw Object.assign(new Error('Передайте непустой файл .dem или .csv в поле demo'), { status: 400 });
+      }
+      if (path.extname(req.file.originalname).toLowerCase() === '.csv') {
+        try { await parseCsvFile(req.file.path); }
+        catch (err) { throw Object.assign(err, { status: 400 }); }
       }
       const demo = await transaction(async (tx) => {
         const { rows: tournaments } = await tx.query('SELECT id FROM tournaments WHERE id = $1 FOR KEY SHARE', [id]);

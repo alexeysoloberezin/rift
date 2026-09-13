@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { parseCsvFile } from './csvDemo.service.js';
 import { withTransaction } from '../config/db.js';
 import { parseDemoFile } from './demoParser.client.js';
 import { computeMatchRating, computeEloSwing } from './rating.service.js';
@@ -8,7 +10,14 @@ import { matchTeamsByCaptain, normalizeCaptainName } from './teamCaptainMatching
  * регистра). Если и это не помогло — создаёт нового игрока "с нуля"
  * (например, это заглянувший на замену игрок, которого не было в Excel).
  */
-async function resolvePlayer(tx, { steamId, nickname }) {
+async function resolvePlayer(tx, { steamId, nickname, screenshot = false, tournamentId }) {
+  if (screenshot && !steamId) {
+    const { rows } = await tx.query(`SELECT p.* FROM players p
+      JOIN tournament_players tp ON tp.player_id = p.id
+      WHERE tp.tournament_id = $1 AND LOWER(p.nickname) = LOWER($2)`, [tournamentId, nickname.trim()]);
+    if (rows.length !== 1) throw new Error(`Не удалось однозначно найти «${nickname}» среди игроков турнира. Укажите его полный ник из RIFT или Steam ID в CSV.`);
+    return rows[0];
+  }
   if (steamId) {
     const { rows } = await tx.query('SELECT * FROM players WHERE steam_id64 = $1', [steamId]);
     if (rows[0]) return rows[0];
@@ -64,7 +73,7 @@ async function ensureMatchTeams(tx, match, parsed) {
   if (!teamAId) {
     const { rows } = await tx.query(
       `INSERT INTO teams (tournament_id, name) VALUES ($1, $2) RETURNING id`,
-      [match.tournament_id, `Автосостав A — ${parsed.map || 'без карты'}`]
+      [match.tournament_id, parsed.team_a_name || `Автосостав A — ${parsed.map || 'без карты'}`]
     );
     teamAId = rows[0].id;
     autoCreated.A = true;
@@ -72,7 +81,7 @@ async function ensureMatchTeams(tx, match, parsed) {
   if (!teamBId) {
     const { rows } = await tx.query(
       `INSERT INTO teams (tournament_id, name) VALUES ($1, $2) RETURNING id`,
-      [match.tournament_id, `Автосостав B — ${parsed.map || 'без карты'}`]
+      [match.tournament_id, parsed.team_b_name || `Автосостав B — ${parsed.map || 'без карты'}`]
     );
     teamBId = rows[0].id;
     autoCreated.B = true;
@@ -94,14 +103,19 @@ async function ensureMatchTeams(tx, match, parsed) {
  * @param {string} matchId
  * @param {string} filePath — путь к сохранённому .dem файлу на диске
  */
-export async function processDemo(demoId, matchId, filePath) {
-  const parsed = await parseDemoFile(filePath);
+export async function processDemo(demoId, matchId, filePath, deps = {}) {
+  const partial = path.extname(filePath).toLowerCase() === '.csv';
+  const parsed = partial ? await (deps.parseCsvFile || parseCsvFile)(filePath) : await parseDemoFile(filePath);
 
-  await withTransaction(async (tx) => {
-    const { rows: matchRows } = await tx.query('SELECT * FROM matches WHERE id = $1', [matchId]);
+  await (deps.withTransaction || withTransaction)(async (tx) => {
+    const { rows: matchRows } = await tx.query('SELECT * FROM matches WHERE id = $1 FOR UPDATE', [matchId]);
     let match = matchRows[0];
     if (!match) throw new Error('Матч не найден');
 
+    if (partial) {
+      const { rows: rated } = await tx.query('SELECT 1 FROM match_player_stats WHERE match_id = $1 AND elo_before IS NOT NULL LIMIT 1', [matchId]);
+      if (rated.length) throw new Error('CSV не может заменить статистику матча с рассчитанным рейтингом. Загрузите полное демо или создайте отдельный матч.');
+    }
     const ensured = await ensureMatchTeams(tx, match, parsed);
     match = ensured.match;
     const { autoCreated, captainTeams } = ensured;
@@ -118,7 +132,7 @@ export async function processDemo(demoId, matchId, filePath) {
       'SELECT player_id, elo_before FROM match_player_stats WHERE match_id = $1',
       [matchId]
     );
-    const existingEloBefore = new Map(existingStatsRows.map((r) => [r.player_id, Number(r.elo_before)]));
+    const existingEloBefore = new Map(existingStatsRows.filter(r => r.elo_before != null).map((r) => [r.player_id, Number(r.elo_before)]));
 
     const teamAStats = [];
     const teamBStats = [];
@@ -126,8 +140,11 @@ export async function processDemo(demoId, matchId, filePath) {
     // Резолвим всех игроков и считаем им match rating
     const resolved = [];
     for (const pStat of parsed.players) {
-      const player = await resolvePlayer(tx, { steamId: pStat.steam_id, nickname: pStat.nickname });
-      const matchRating = computeMatchRating({
+      const player = await resolvePlayer(tx, { steamId: pStat.steam_id, nickname: pStat.nickname,
+        screenshot: parsed.csv_format === 'screenshot', tournamentId: match.tournament_id });
+      if (resolved.some(item => item.player.id === player.id)) throw new Error('Несколько строк CSV соответствуют одному игроку');
+      if (partial && !pStat.steam_id) pStat.steam_id = player.steam_id64 || null;
+      const matchRating = partial ? null : computeMatchRating({
         kills: pStat.kills,
         deaths: pStat.deaths,
         assists: pStat.assists,
@@ -162,7 +179,7 @@ export async function processDemo(demoId, matchId, filePath) {
     const currentPlayerIds = new Set(resolved.map((r) => r.player.id));
     const staleRows = existingStatsRows.filter((r) => !currentPlayerIds.has(r.player_id));
     for (const s of staleRows) {
-      await tx.query(
+      if (s.elo_before != null) await tx.query(
         'UPDATE players SET rating = $1, matches_played = GREATEST(matches_played - 1, 0), updated_at = now() WHERE id = $2',
         [s.elo_before, s.player_id]
       );
@@ -179,7 +196,7 @@ export async function processDemo(demoId, matchId, filePath) {
     const winner =
       parsed.team_a_score > parsed.team_b_score ? 'A' : parsed.team_a_score < parsed.team_b_score ? 'B' : 'draw';
 
-    const eloChanges = computeEloSwing({ teamA: teamAStats, teamB: teamBStats, winner });
+    const eloChanges = partial ? new Map() : computeEloSwing({ teamA: teamAStats, teamB: teamBStats, winner });
 
     for (const { pStat, player, matchRating, isReprocess } of resolved) {
       const teamId = pStat.side_majority === 'A' ? match.team_a_id : match.team_b_id;
@@ -198,9 +215,9 @@ export async function processDemo(demoId, matchId, filePath) {
         ]);
       }
 
-      const adr = pStat.rounds_played ? Math.round((pStat.damage / pStat.rounds_played) * 100) / 100 : 0;
-      const kastPct = pStat.rounds_played ? Math.round((pStat.kast_rounds / pStat.rounds_played) * 10000) / 100 : 0;
-      const change = eloChanges.get(player.id);
+      const adr = partial ? pStat.adr ?? null : pStat.rounds_played ? Math.round((pStat.damage / pStat.rounds_played) * 100) / 100 : null;
+      const kastPct = partial ? null : pStat.rounds_played ? Math.round((pStat.kast_rounds / pStat.rounds_played) * 10000) / 100 : 0;
+      const change = eloChanges.get(player.id) || { eloBefore: null, eloAfter: null, eloChange: null };
 
       await tx.query(
         `INSERT INTO match_player_stats (
@@ -220,10 +237,12 @@ export async function processDemo(demoId, matchId, filePath) {
         [
           matchId, player.id, teamId, pStat.rounds_played, pStat.kills, pStat.deaths, pStat.assists,
           pStat.headshots || 0, pStat.damage, adr, pStat.kast_rounds, kastPct,
-          pStat.entry_kills || 0, pStat.entry_deaths || 0, pStat.clutches_won || 0, pStat.clutches_played || 0,
+          pStat.entry_kills ?? (partial ? null : 0), pStat.entry_deaths ?? (partial ? null : 0), pStat.clutches_won ?? (partial ? null : 0), pStat.clutches_played ?? (partial ? null : 0),
           JSON.stringify(pStat.multi_kills || {}), matchRating, change.eloBefore, change.eloAfter, change.eloChange,
         ]
       );
+
+      if (partial) continue;
 
       // matches_played увеличиваем только при самой первой обработке этого
       // матча для игрока — иначе переобработка задваивала бы счётчик матчей.
@@ -276,8 +295,8 @@ export async function processDemo(demoId, matchId, filePath) {
     }
 
     await tx.query(
-      `UPDATE matches SET map = $1, score_a = $2, score_b = $3, status = 'rated' WHERE id = $4`,
-      [parsed.map, parsed.team_a_score, parsed.team_b_score, matchId]
+      `UPDATE matches SET map = COALESCE($1, map), score_a = CASE WHEN score_manually_set THEN score_a ELSE COALESCE($2, score_a) END, score_b = CASE WHEN score_manually_set THEN score_b ELSE COALESCE($3, score_b) END, status = $5 WHERE id = $4`,
+      [parsed.map, parsed.team_a_score, parsed.team_b_score, matchId, partial ? 'played' : 'rated']
     );
 
     await tx.query(

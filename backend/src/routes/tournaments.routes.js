@@ -52,7 +52,7 @@ router.get('/:id', async (req, res) => {
     );
 
     const { rows: matches } = await query(
-      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
+      `SELECT m.*, (SELECT updated_at FROM match_screenshots WHERE match_id = m.id) AS screenshot_version, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
        FROM matches m
        LEFT JOIN teams ta ON ta.id = m.team_a_id
        LEFT JOIN teams tb ON tb.id = m.team_b_id

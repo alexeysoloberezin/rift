@@ -1,3 +1,4 @@
+import { parseCsvFile } from '../services/csvDemo.service.js';
 import { Router } from 'express';
 import multer from 'multer';
 import fs from 'node:fs';
@@ -43,13 +44,13 @@ router.post('/matches/:matchId/demo/attach', requireAdmin, async (req, res) => {
       }
       await tx.query("UPDATE demos SET match_id = $1, status = 'parsing', error_message = NULL WHERE id = $2", [match.id, demoId]);
       await tx.query("UPDATE matches SET status = 'parsing_demo' WHERE id = $1", [match.id]);
-      return { ...uploaded, match_id: match.id, status: 'parsing' };
+      return { ...uploaded, match_id: match.id, status: 'parsing', previous_status: match.status };
     });
     res.status(202).json({ success: true, data: { id: demo.id, match_id: demo.match_id, status: demo.status } });
     Promise.resolve().then(() => processDemo(demo.id, demo.match_id, demo.storage_path)).catch(async (err) => {
       console.error('Ошибка обработки демо:', err.message);
       await query('UPDATE demos SET status = $1, error_message = $2 WHERE id = $3', ['error', err.message, demo.id]).catch(() => {});
-      await query('UPDATE matches SET status = $1 WHERE id = $2', ['needs_demo', demo.match_id]).catch(() => {});
+      await query('UPDATE matches SET status = $1 WHERE id = $2', [demo.previous_status || 'needs_demo', demo.match_id]).catch(() => {});
     });
   } catch (err) {
     res.status(err.status || 500).json({ success: false, error: err.message });
@@ -63,7 +64,10 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(UPLOADS_DIR, 'demos')),
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`),
 });
-const upload = multer({ storage, limits: { fileSize: 2 * 1024 * 1024 * 1024 } }); // до 2 ГБ на демку
+const upload = multer({ storage, fileFilter(req, file, cb) {
+  if (!['.dem', '.csv'].includes(path.extname(file.originalname).toLowerCase())) return cb(Object.assign(new Error('Выберите .dem или .csv'), { status: 400 }));
+  cb(null, true);
+}, limits: { fileSize: 2 * 1024 * 1024 * 1024 } }); // до 2 ГБ на демку
 
 // Этот роутер монтируется в index.js на "/api" — путь "/matches/:matchId/demo".
 
@@ -72,8 +76,12 @@ router.post('/matches/:matchId/demo', requireAdmin, upload.single('demo'), async
   try {
     if (!req.file) return res.status(400).json({ success: false, error: 'Файл не передан (поле "demo")' });
 
+    if (path.extname(req.file.originalname).toLowerCase() === '.csv') {
+      try { await parseCsvFile(req.file.path); }
+      catch (err) { throw Object.assign(err, { status: 400 }); }
+    }
     const { matchId } = req.params;
-    const { rows: matchRows } = await query('SELECT id FROM matches WHERE id = $1', [matchId]);
+    const { rows: matchRows } = await query('SELECT id, status FROM matches WHERE id = $1', [matchId]);
     if (matchRows.length === 0) {
       fs.unlink(req.file.path, () => {});
       return res.status(404).json({ success: false, error: 'Матч не найден' });
@@ -96,11 +104,12 @@ router.post('/matches/:matchId/demo', requireAdmin, upload.single('demo'), async
     processDemo(demo.id, matchId, req.file.path).catch(async (err) => {
       console.error('❌ Ошибка обработки демки:', err.message);
       await query('UPDATE demos SET status = $1, error_message = $2 WHERE id = $3', ['error', err.message, demo.id]).catch(() => {});
-      await query('UPDATE matches SET status = $1 WHERE id = $2', ['needs_demo', matchId]).catch(() => {});
+      await query('UPDATE matches SET status = $1 WHERE id = $2', [matchRows[0].status || 'needs_demo', matchId]).catch(() => {});
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ success: false, error: err.message });
+    if (err.status === 400 && req.file) await fs.promises.unlink(req.file.path).catch(() => {});
+    res.status(err.status || 500).json({ success: false, error: err.message });
   }
 });
 

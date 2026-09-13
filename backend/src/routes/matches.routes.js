@@ -13,7 +13,7 @@ const router = Router();
 router.get('/matches/:id', async (req, res) => {
   try {
     const { rows: matchRows } = await query(
-      `SELECT m.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
+      `SELECT m.*, (SELECT updated_at FROM match_screenshots WHERE match_id = m.id) AS screenshot_version, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo
        FROM matches m
        LEFT JOIN teams ta ON ta.id = m.team_a_id
        LEFT JOIN teams tb ON tb.id = m.team_b_id
@@ -93,6 +93,9 @@ router.post('/tournaments/:tournamentId/matches', requireAdmin, async (req, res)
 router.put('/matches/:id', requireAdmin, async (req, res) => {
   try {
     const { map, score_a, score_b, status, played_at, team_a_id, team_b_id } = req.body;
+    if ([score_a, score_b].some(score => score != null && (!Number.isInteger(score) || score < 0 || score > 1000))) {
+      return res.status(400).json({ success: false, error: 'Счёт должен быть целым числом от 0 до 1000' });
+    }
     if (team_a_id && team_b_id && team_a_id === team_b_id) {
       return res
         .status(400)
@@ -101,7 +104,8 @@ router.put('/matches/:id', requireAdmin, async (req, res) => {
     const { rows } = await query(
       `UPDATE matches SET
          map = COALESCE($1, map), score_a = COALESCE($2, score_a), score_b = COALESCE($3, score_b),
-         status = COALESCE($4, status), played_at = COALESCE($5, played_at),
+         score_manually_set = CASE WHEN $2::integer IS NOT NULL OR $3::integer IS NOT NULL THEN true ELSE score_manually_set END,
+         status = COALESCE($4, CASE WHEN COALESCE($2, score_a) IS NOT NULL AND COALESCE($3, score_b) IS NOT NULL AND status IN ('scheduled', 'needs_demo') THEN 'played' ELSE status END), played_at = COALESCE($5, played_at),
          team_a_id = COALESCE($6, team_a_id), team_b_id = COALESCE($7, team_b_id)
        WHERE id = $8 RETURNING *`,
       [map, score_a, score_b, status, played_at, team_a_id || null, team_b_id || null, req.params.id]
@@ -191,7 +195,7 @@ router.delete('/matches/:id', requireAdmin, async (req, res) => {
         'SELECT player_id, elo_before FROM match_player_stats WHERE match_id = $1',
         [req.params.id]
       );
-      for (const s of statsRows) {
+      for (const s of statsRows.filter(row => row.elo_before != null)) {
         await tx.query(
           'UPDATE players SET rating = $1, matches_played = GREATEST(matches_played - 1, 0), updated_at = now() WHERE id = $2',
           [s.elo_before, s.player_id]

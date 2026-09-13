@@ -12,6 +12,7 @@ import groupsRoutes from './routes/groups.routes.js';
 import bracketRoutes from './routes/bracket.routes.js';
 import draftRoutes from './routes/draft.routes.js';
 import mapVetoRoutes from './routes/mapVeto.routes.js';
+import matchScreenshotsRoutes from './routes/matchScreenshots.routes.js';
 import { startSheetSyncPoller } from './services/sheetSync.service.js';
 
 dotenv.config();
@@ -34,6 +35,7 @@ app.use('/api/players', playersRoutes);
 app.use('/api', groupsRoutes); // /api/tournaments/:id/groups, /api/groups/:id
 app.use('/api', bracketRoutes); // /api/tournaments/:id/bracket, /api/bracket-slots/:id
 app.use('/api', mapVetoRoutes);
+app.use('/api', matchScreenshotsRoutes);
 app.use('/api', draftRoutes); // /api/tournaments/:id/draft, /api/draft/captain/:token
 
 // Единая обработка ошибок (например, слишком большой файл от multer)

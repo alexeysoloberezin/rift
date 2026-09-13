@@ -28,10 +28,10 @@ test('server demo upload HTTP contract', async (t) => {
   await new Promise((resolve) => server.once('listening', resolve));
   t.after(async () => { await new Promise((resolve) => server.close(resolve)); await rm(directory, { recursive: true, force: true }); });
   const id = '12345678-1234-1234-1234-123456789abc';
-  async function send({ token = 'test-secret', tournament = id, filename = 'match.dem', file = true } = {}) {
+  async function send({ token = 'test-secret', tournament = id, filename = 'match.dem', file = true, content = 'demo-content' } = {}) {
     const body = new FormData();
     // File first verifies that multipart field ordering does not matter.
-    if (file) body.append('demo', new Blob(['demo-content']), filename);
+    if (file) body.append('demo', new Blob([content]), filename);
     body.append('tournament_id', tournament);
     return fetch(`http://127.0.0.1:${server.address().port}/api/server/demos`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` }, body,
@@ -60,6 +60,10 @@ test('server demo upload HTTP contract', async (t) => {
   assert.equal(result.data.status, 'pending');
   assert.equal(parsed.length, 0);
   assert.equal((await readdir(directory)).length, 1);
+  assert.equal((await send({ filename: 'invalid.csv' })).status, 400);
+  const csv = 'matchid,mapnumber,steamid64,team,name,kills,deaths,damage,assists,head_shot_kills\n1,0,76561197993369444,one,Player1,10,8,1000,2,4\n1,0,76561199508394114,two,Player2,8,10,900,1,3';
+  assert.equal((await send({ filename: 'stats.csv', content: csv })).status, 202);
+  assert.equal((await readdir(directory)).filter(name => name.endsWith('.csv')).length, 1);
   assert.ok(!calls.some(({ sql }) => sql.includes('INSERT INTO matches')));
   assert.ok(calls.some(({ sql, params }) => sql.includes('INSERT INTO demos') && params[0] === id));
 });
