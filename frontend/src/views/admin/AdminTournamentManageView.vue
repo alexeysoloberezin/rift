@@ -312,7 +312,7 @@ function slotLabel(round, slotIndex) {
 // Значение для v-model select'а стадии: текущая привязка матча, если есть.
 function currentStage(match) {
   if (match.group_id) return `group:${match.group_id}`;
-  const slot = bracketSlots.value.find((s) => s.match_id === match.id);
+  const slot = bracketSlots.value.find((s) => (s.matches || []).some((linked) => linked.id === match.id));
   if (slot) return `${slot.round}:${slot.slot_index}`;
   return '';
 }

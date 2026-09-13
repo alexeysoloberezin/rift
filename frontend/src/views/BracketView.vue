@@ -46,12 +46,12 @@ const nodes = computed(() => {
   const final = findSlot('final', 0);
   const list = [];
   if (sf0) list.push({ id: sf0.id, type: 'slot', position: { x: 0, y: 0 }, data: { ...sf0, label: 'Полуфинал 1' } });
-  if (sf1) list.push({ id: sf1.id, type: 'slot', position: { x: 0, y: 190 }, data: { ...sf1, label: 'Полуфинал 2' } });
+  if (sf1) list.push({ id: sf1.id, type: 'slot', position: { x: 0, y: 280 }, data: { ...sf1, label: 'Полуфинал 2' } });
   if (final)
     list.push({
       id: final.id,
       type: 'slot',
-      position: { x: 380, y: 95 },
+      position: { x: 380, y: 140 },
       data: { ...final, label: 'Финал', isFinal: true },
     });
   return list;
@@ -68,10 +68,17 @@ const edges = computed(() => {
 });
 
 function isWinner(data, side) {
-  if (data.match_score_a == null || data.match_score_b == null || data.match_score_a === data.match_score_b) {
-    return false;
-  }
-  return side === 'a' ? data.match_score_a > data.match_score_b : data.match_score_b > data.match_score_a;
+  const wins = seriesWins(data);
+  if (wins.a === wins.b) return false;
+  return side === 'a' ? wins.a > wins.b : wins.b > wins.a;
+}
+
+function seriesWins(data) {
+  return (data.matches || []).reduce((wins, match) => {
+    if (match.score_a > match.score_b) wins.a++;
+    if (match.score_b > match.score_a) wins.b++;
+    return wins;
+  }, { a: 0, b: 0 });
 }
 </script>
 
@@ -107,15 +114,19 @@ function isWinner(data, side) {
             <div class="bracket-node__round">{{ data.label }}</div>
             <div class="bracket-node__team" :class="{ 'bracket-node__team--winner': isWinner(data, 'a') }">
               <span class="bracket-node__name">{{ data.team_a_name || 'TBD' }} <TeamElo v-if="data.team_a_name" :value="data.team_a_average_elo" /></span>
-              <span v-if="data.match_score_a !== null" class="mono">{{ data.match_score_a }}</span>
+              <span v-if="data.matches?.length" class="mono">{{ seriesWins(data).a }}</span>
             </div>
             <div class="bracket-node__team" :class="{ 'bracket-node__team--winner': isWinner(data, 'b') }">
               <span class="bracket-node__name">{{ data.team_b_name || 'TBD' }} <TeamElo v-if="data.team_b_name" :value="data.team_b_average_elo" /></span>
-              <span v-if="data.match_score_b !== null" class="mono">{{ data.match_score_b }}</span>
+              <span v-if="data.matches?.length" class="mono">{{ seriesWins(data).b }}</span>
             </div>
-            <RouterLink v-if="data.match_id" :to="`/matches/${data.match_id}`" class="bracket-node__link">
-              <StatusBadge :status="data.match_status" />
-            </RouterLink>
+            <div v-if="data.matches?.length" class="bracket-node__matches">
+              <RouterLink v-for="(match, index) in data.matches" :key="match.id" :to="`/matches/${match.id}`" class="bracket-node__link">
+                {{ match.map || `Карта ${index + 1}` }}
+                <span v-if="match.score_a != null" class="mono">{{ match.score_a }}:{{ match.score_b }}</span>
+                <StatusBadge :status="match.status" />
+              </RouterLink>
+            </div>
           </div>
         </template>
       </VueFlow>
@@ -148,7 +159,7 @@ function isWinner(data, side) {
 
 .bracket-wrap {
   padding: 8px;
-  height: 460px;
+  height: 650px;
 }
 
 .bracket-flow {
@@ -215,7 +226,12 @@ function isWinner(data, side) {
 }
 
 .bracket-node__link {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
   padding: 8px 12px;
 }
+
+.bracket-node__matches { border-top: 1px solid var(--line); }
 </style>

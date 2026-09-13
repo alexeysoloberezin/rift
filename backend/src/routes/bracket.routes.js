@@ -28,16 +28,20 @@ function sortSlots(rows) {
 }
 
 // GET /api/tournaments/:tournamentId/bracket — публично: слоты сетки с
-// именами команд и (если слот привязан к матчу) его статусом/счётом/картой.
+// именами команд и массивом матчей-карт, привязанных к серии.
 router.get('/tournaments/:tournamentId/bracket', async (req, res) => {
   try {
     const { rows } = await query(
       `SELECT bs.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo,
-              m.status AS match_status, m.score_a AS match_score_a, m.score_b AS match_score_b, m.map AS match_map
+              COALESCE((SELECT json_agg(json_build_object(
+                'id', m.id, 'status', m.status, 'score_a', m.score_a, 'score_b', m.score_b,
+                'map', m.map, 'created_at', m.created_at
+              ) ORDER BY bsm.created_at, m.created_at)
+              FROM bracket_slot_matches bsm JOIN matches m ON m.id = bsm.match_id
+              WHERE bsm.slot_id = bs.id), '[]'::json) AS matches
        FROM bracket_slots bs
        LEFT JOIN teams ta ON ta.id = bs.team_a_id
        LEFT JOIN teams tb ON tb.id = bs.team_b_id
-       LEFT JOIN matches m ON m.id = bs.match_id
        WHERE bs.tournament_id = $1`,
       [req.params.tournamentId]
     );
@@ -68,9 +72,8 @@ router.post('/tournaments/:tournamentId/bracket/init', requireAdmin, async (req,
   }
 });
 
-// PUT /api/bracket-slots/:id — задать команды слота и/или привязать матч.
-// Принимает полный набор полей (не COALESCE) — фронт всегда шлёт все три,
-// это позволяет и очищать слот (передав null), а не только заполнять.
+// PUT /api/bracket-slots/:id — задать команды и при необходимости добавить
+// ещё один матч в серию. Пустой match_id уже добавленные матчи не удаляет.
 router.put('/bracket-slots/:id', requireAdmin, async (req, res) => {
   try {
     const { team_a_id, team_b_id, match_id } = req.body;
@@ -80,11 +83,13 @@ router.put('/bracket-slots/:id', requireAdmin, async (req, res) => {
         .json({ success: false, error: 'Команда A и команда B не могут быть одной и той же командой' });
     }
     const { rows } = await query(
-      `UPDATE bracket_slots SET team_a_id = $1, team_b_id = $2, match_id = $3, updated_at = now()
-       WHERE id = $4 RETURNING *`,
-      [team_a_id || null, team_b_id || null, match_id || null, req.params.id]
+      `UPDATE bracket_slots SET team_a_id = $1, team_b_id = $2, updated_at = now()
+       WHERE id = $3 RETURNING *`,
+      [team_a_id || null, team_b_id || null, req.params.id]
     );
     if (rows.length === 0) return res.status(404).json({ success: false, error: 'Слот сетки не найден' });
+    // Backward compatible admin API: supplying a match adds it to the series.
+    if (match_id) await query('INSERT INTO bracket_slot_matches (slot_id, match_id) VALUES ($1, $2) ON CONFLICT (match_id) DO UPDATE SET slot_id = EXCLUDED.slot_id', [req.params.id, match_id]);
     res.json({ success: true, data: rows[0] });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

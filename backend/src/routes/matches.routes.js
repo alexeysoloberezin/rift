@@ -3,6 +3,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 import { query, withTransaction } from '../config/db.js';
 import { requireAdmin } from '../middleware/auth.js';
+import { setMatchStage } from '../services/matchStage.service.js';
 
 const router = Router();
 
@@ -127,43 +128,12 @@ router.put('/matches/:id', requireAdmin, async (req, res) => {
 //   "group:<uuid>"        — привязать к группе с этим id
 //   "semifinal:0" | "semifinal:1" | "final:0" — привязать к слоту сетки
 //
-// Перед установкой новой привязки всегда снимаем старую (и group_id, и
-// bracket_slots.match_id) — у матча может быть только одна привязка сразу,
-// и без явной очистки при переносе матча из группы в сетку (или наоборот)
-// осталась бы "хвостовая" привязка в другом месте.
+// Перед установкой новой привязки снимается только связь этого матча.
+// В одном слоте плей-офф может быть несколько матчей-карт одной серии.
 router.put('/matches/:id/stage', requireAdmin, async (req, res) => {
   try {
     const { stage } = req.body;
-    const result = await withTransaction(async (tx) => {
-      const { rows: matchRows } = await tx.query('SELECT id, tournament_id FROM matches WHERE id = $1', [
-        req.params.id,
-      ]);
-      if (matchRows.length === 0) return null;
-      const match = matchRows[0];
-
-      await tx.query('UPDATE matches SET group_id = NULL WHERE id = $1', [match.id]);
-      await tx.query('UPDATE bracket_slots SET match_id = NULL, updated_at = now() WHERE match_id = $1', [
-        match.id,
-      ]);
-
-      if (stage && stage.startsWith('group:')) {
-        const groupId = stage.slice('group:'.length);
-        await tx.query('UPDATE matches SET group_id = $1 WHERE id = $2', [groupId, match.id]);
-      } else if (stage) {
-        const [round, slotIndexStr] = stage.split(':');
-        const slotIndex = Number(slotIndexStr);
-        const { rowCount } = await tx.query(
-          'UPDATE bracket_slots SET match_id = $1, updated_at = now() WHERE tournament_id = $2 AND round = $3 AND slot_index = $4',
-          [match.id, match.tournament_id, round, slotIndex]
-        );
-        if (rowCount === 0) {
-          throw Object.assign(new Error('Слот сетки не найден'), { statusCode: 400 });
-        }
-      }
-
-      const { rows } = await tx.query('SELECT * FROM matches WHERE id = $1', [match.id]);
-      return rows[0];
-    });
+    const result = await withTransaction((tx) => setMatchStage(tx, req.params.id, stage));
     if (result === null) return res.status(404).json({ success: false, error: 'Матч не найден' });
     res.json({ success: true, data: result });
   } catch (err) {
@@ -251,7 +221,8 @@ router.put('/matches/:id/teams', requireAdmin, async (req, res) => {
         WHEN team_id = $2 THEN $4::uuid WHEN team_id = $3 THEN $5::uuid ELSE team_id END WHERE match_id = $1`,
         [match.id, match.team_a_id, match.team_b_id, a, b]);
       const { rows: updated } = await tx.query('UPDATE matches SET team_a_id = $1, team_b_id = $2, teams_manually_set = true WHERE id = $3 RETURNING *', [a, b, match.id]);
-      await tx.query('UPDATE bracket_slots SET team_a_id = $1, team_b_id = $2, updated_at = now() WHERE match_id = $3', [a, b, match.id]);
+      await tx.query(`UPDATE bracket_slots bs SET team_a_id = $1, team_b_id = $2, updated_at = now()
+        FROM bracket_slot_matches bsm WHERE bsm.slot_id = bs.id AND bsm.match_id = $3`, [a, b, match.id]);
       return updated[0];
     });
     res.json({ success: true, data: result });

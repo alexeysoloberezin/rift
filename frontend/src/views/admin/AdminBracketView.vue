@@ -5,7 +5,6 @@ import { useRoute, RouterLink } from 'vue-router';
 import { VueFlow } from '@vue-flow/core';
 import '@vue-flow/core/dist/style.css';
 import apiClient from '../../api/client';
-import StatusBadge from '../../components/StatusBadge.vue';
 
 // Админка плей-офф сетки: фиксированная форма "полуфинал (2 матча) -> финал
 // (1 матч)" — см. backend/src/routes/bracket.routes.js. Админ здесь только
@@ -29,7 +28,7 @@ const loading = ref(true);
 const initializing = ref(false);
 const initError = ref('');
 
-const drafts = ref({}); // slot_id -> { team_a_id, team_b_id, match_id }
+const drafts = ref({}); // slot_id -> { team_a_id, team_b_id, match_id to add }
 const savingSlotId = ref(null);
 const slotError = ref({}); // slot_id -> сообщение об ошибке
 const selectedSlotId = ref(null);
@@ -55,7 +54,7 @@ async function loadAll() {
     drafts.value[s.id] = {
       team_a_id: s.team_a_id || '',
       team_b_id: s.team_b_id || '',
-      match_id: s.match_id || '',
+      match_id: '',
     };
   }
   loading.value = false;
@@ -187,17 +186,19 @@ function onNodeClick({ node }) {
             <option v-for="t in tournament.teams" :key="t.id" :value="t.id">{{ t.name }} · Среднее Elo {{ t.average_elo == null ? '—' : Number(t.average_elo).toLocaleString('ru-RU', { maximumFractionDigits: 0 }) }}</option>
           </select>
           <select v-model="drafts[slot.id].match_id" class="match-select">
-            <option value="">Без привязанного матча</option>
+            <option value="">Добавить матч в серию…</option>
             <option v-for="m in tournament.matches" :key="m.id" :value="m.id">{{ matchLabel(m) }}</option>
           </select>
           <button class="btn btn-primary" :disabled="savingSlotId === slot.id" @click="saveSlot(slot)">
             {{ savingSlotId === slot.id ? 'Сохраняем…' : 'Сохранить' }}
           </button>
         </div>
-        <p v-if="slot.match_id" class="text-muted linked-match">
-          Привязан матч: <RouterLink :to="`/matches/${slot.match_id}`">открыть</RouterLink>
-          <StatusBadge v-if="slot.match_status" :status="slot.match_status" />
-        </p>
+        <div v-if="slot.matches?.length" class="linked-match">
+          <span class="text-muted">Матчи серии:</span>
+          <RouterLink v-for="(match, index) in slot.matches" :key="match.id" :to="`/matches/${match.id}`">
+            Карта {{ index + 1 }} <span v-if="match.score_a != null">({{ match.score_a }}:{{ match.score_b }})</span>
+          </RouterLink>
+        </div>
         <p v-if="slotError[slot.id]" class="delta-negative">{{ slotError[slot.id] }}</p>
       </section>
     </template>
