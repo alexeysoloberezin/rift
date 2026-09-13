@@ -1,5 +1,6 @@
 <script setup>
 import TeamElo from '../components/TeamElo.vue';
+import { standingsFor } from '../lib/groupStandings';
 import { computed, onMounted, ref } from 'vue';
 import { useRoute, RouterLink } from 'vue-router';
 import apiClient from '../api/client';
@@ -24,25 +25,10 @@ async function load() {
 
 onMounted(load);
 
-// Простая турнирная таблица группы: победы/поражения по сыгранным матчам
-// этой группы (только там, где есть счёт и он не ничейный — в CS2 матчи
-// вничью не заканчиваются, но защищаемся на случай ручного ввода).
-function standingsFor(group) {
-  const stats = new Map(group.teams.map((t) => [t.id, { team: t, w: 0, l: 0 }]));
-  for (const m of group.matches) {
-    if (m.score_a == null || m.score_b == null || m.score_a === m.score_b) continue;
-    const winnerId = m.score_a > m.score_b ? m.team_a_id : m.team_b_id;
-    const loserId = m.score_a > m.score_b ? m.team_b_id : m.team_a_id;
-    if (stats.has(winnerId)) stats.get(winnerId).w += 1;
-    if (stats.has(loserId)) stats.get(loserId).l += 1;
-  }
-  return [...stats.values()].sort((a, b) => b.w - a.w || a.l - b.l);
-}
-
 const standingsByGroup = computed(() => new Map(groups.value.map((g) => [g.id, standingsFor(g)])));
 
 // Из каждой группы в плей-офф выходят 2 верхние команды таблицы (см.
-// standingsFor выше — уже отсортировано по числу побед).
+// standingsFor — сортировка по разнице раундов).
 const QUALIFY_COUNT = 2;
 </script>
 
@@ -70,6 +56,7 @@ const QUALIFY_COUNT = 2;
             <span>Команда</span>
             <span>В</span>
             <span>П</span>
+            <span title="Выигранные раунды минус проигранные">РР ↓</span>
           </div>
           <div
             v-for="(row, i) in standingsByGroup.get(group.id)"
@@ -81,6 +68,7 @@ const QUALIFY_COUNT = 2;
             <span>{{ row.team.name }} <TeamElo :value="row.team.average_elo" /></span>
             <span class="mono">{{ row.w }}</span>
             <span class="mono">{{ row.l }}</span>
+            <span class="mono" :class="{ 'delta-positive': row.roundDiff > 0, 'delta-negative': row.roundDiff < 0 }">{{ row.roundDiff > 0 ? '+' : '' }}{{ row.roundDiff }}</span>
           </div>
         </div>
         <p v-else class="text-muted">Команды в эту группу ещё не добавлены.</p>
@@ -88,6 +76,7 @@ const QUALIFY_COUNT = 2;
           <span class="qualify-dot"></span> — топ-2 команды группы выходят в плей-офф
         </p>
 
+        <p class="text-muted sorting-note">РР — разница раундов за все матчи группы. Сортировка: РР → победы → меньше поражений.</p>
         <h3 class="matches-title">Результаты встреч</h3>
         <div class="matches-list" v-if="group.matches.length">
           <RouterLink
@@ -166,11 +155,14 @@ const QUALIFY_COUNT = 2;
 .standings-head,
 .standings-row {
   display: grid;
-  grid-template-columns: 18px 1fr 32px 32px;
+  grid-template-columns: 18px minmax(0, 1fr) 24px 24px 48px;
   gap: 8px;
   padding: 8px 12px;
   align-items: center;
 }
+
+.standings-row > :nth-child(2) { overflow-wrap: anywhere; min-width: 0; }
+.sorting-note { font-size: 12px; margin-bottom: 16px; }
 
 .standings-head {
   text-transform: uppercase;
