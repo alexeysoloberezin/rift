@@ -4,13 +4,19 @@ import { withTransaction } from '../config/db.js';
 import { parseDemoFile } from './demoParser.client.js';
 import { computeMatchRating, computeEloSwing } from './rating.service.js';
 import { matchTeamsByCaptain, normalizeCaptainName } from './teamCaptainMatching.js';
+import { applyTournamentDemoAliases } from './demoAliases.service.js';
 
 /**
  * Находит игрока в БД по steam_id64, а если не найден — по нику (без учёта
  * регистра). Если и это не помогло — создаёт нового игрока "с нуля"
  * (например, это заглянувший на замену игрок, которого не было в Excel).
  */
-async function resolvePlayer(tx, { steamId, nickname, screenshot = false, tournamentId }) {
+async function resolvePlayer(tx, { playerId, steamId, nickname, screenshot = false, tournamentId }) {
+  if (playerId) {
+    const { rows } = await tx.query('SELECT * FROM players WHERE id = $1', [playerId]);
+    if (!rows[0]) throw new Error(`Игрок для ника «${nickname}» больше не существует`);
+    return rows[0];
+  }
   if (screenshot && !steamId) {
     const { rows } = await tx.query(`SELECT p.* FROM players p
       JOIN tournament_players tp ON tp.player_id = p.id
@@ -116,6 +122,7 @@ export async function processDemo(demoId, matchId, filePath, deps = {}) {
       const { rows: rated } = await tx.query('SELECT 1 FROM match_player_stats WHERE match_id = $1 AND elo_before IS NOT NULL LIMIT 1', [matchId]);
       if (rated.length) throw new Error('CSV не может заменить статистику матча с рассчитанным рейтингом. Загрузите полное демо или создайте отдельный матч.');
     }
+    await applyTournamentDemoAliases(tx, match.tournament_id, parsed);
     const ensured = await ensureMatchTeams(tx, match, parsed);
     match = ensured.match;
     const { autoCreated, captainTeams } = ensured;
@@ -140,7 +147,7 @@ export async function processDemo(demoId, matchId, filePath, deps = {}) {
     // Резолвим всех игроков и считаем им match rating
     const resolved = [];
     for (const pStat of parsed.players) {
-      const player = await resolvePlayer(tx, { steamId: pStat.steam_id, nickname: pStat.nickname,
+      const player = await resolvePlayer(tx, { playerId: pStat.rift_player_id, steamId: pStat.steam_id, nickname: pStat.nickname,
         screenshot: parsed.csv_format === 'screenshot', tournamentId: match.tournament_id });
       if (resolved.some(item => item.player.id === player.id)) throw new Error('Несколько строк CSV соответствуют одному игроку');
       if (partial && !pStat.steam_id) pStat.steam_id = player.steam_id64 || null;

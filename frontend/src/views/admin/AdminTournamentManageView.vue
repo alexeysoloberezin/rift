@@ -520,7 +520,7 @@ async function toggleConfirmed(p) {
 // Excel/автосинка данные часто нужно поправить руками — опечатка в нике,
 // битая ссылка на faceit и т.п.) — см. PUT /tournaments/:id/players/:playerId.
 const editingPlayerId = ref(null);
-const playerDraft = ref({ nickname: '', telegram: '', faceit_link: '', seed_rating: null, hours_cs2: null });
+const playerDraft = ref({ nickname: '', telegram: '', faceit_link: '', seed_rating: null, hours_cs2: null, demo_aliases: '' });
 const savingPlayerId = ref(null);
 const playerEditError = ref('');
 
@@ -537,6 +537,7 @@ function toggleEditPlayer(p) {
     faceit_link: p.faceit_link || '',
     seed_rating: p.seed_rating ?? '',
     hours_cs2: p.hours_cs2 ?? '',
+    demo_aliases: (p.demo_aliases || []).join(', '),
   };
 }
 
@@ -584,6 +585,7 @@ async function savePlayerEdit(p) {
       faceit_link: (playerDraft.value.faceit_link || '').trim(),
       seed_rating: playerDraft.value.seed_rating === '' ? null : Number(playerDraft.value.seed_rating),
       hours_cs2: playerDraft.value.hours_cs2 === '' ? null : Number(playerDraft.value.hours_cs2),
+      demo_aliases: playerDraft.value.demo_aliases.split(/[\n,;]/).map((alias) => alias.trim()).filter(Boolean),
     });
     editingPlayerId.value = null;
     await loadAll();
@@ -852,7 +854,13 @@ async function uploadDemo(matchId, e) {
                 Часы в игре
                 <input v-model="playerDraft.hours_cs2" type="number" />
               </label>
+              <label class="demo-alias-field">
+                Ники в демках
+                <input v-model="playerDraft.demo_aliases" type="text" placeholder="например: 纪律, другой ник" />
+                <small>Через запятую. Основной ник игрока не изменится.</small>
+              </label>
             </div>
+            <p class="text-muted alias-hint">Для уже разобранной демки сохраните псевдоним, затем отвяжите демку от матча и привяжите её снова.</p>
             <div class="player-edit-actions">
               <button class="btn btn-primary" :disabled="savingPlayerId === p.player_id" @click="savePlayerEdit(p)">
                 {{ savingPlayerId === p.player_id ? 'Сохраняем…' : 'Сохранить' }}
@@ -1351,6 +1359,21 @@ async function uploadDemo(matchId, e) {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: var(--text-muted);
+}
+
+.player-edit-grid .demo-alias-field {
+  grid-column: 1 / -1;
+}
+
+.demo-alias-field small,
+.alias-hint {
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.alias-hint {
+  margin-top: 10px;
 }
 
 .player-edit-actions {

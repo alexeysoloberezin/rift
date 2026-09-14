@@ -65,6 +65,7 @@ CREATE TABLE tournament_players (
     player_id       UUID NOT NULL REFERENCES players(id) ON DELETE CASCADE,
     seed_rating     NUMERIC(8,2),   -- рейтинг/эло на момент регистрации (из Excel, напр. faceit elo)
     hours_cs2       NUMERIC(8,1),   -- часы в игре (из Excel)
+    demo_aliases    TEXT[] NOT NULL DEFAULT '{}'::text[], -- ники этого игрока внутри dem/csv
     raw_row         JSONB,          -- вся строка из Excel как есть
     imported_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tournament_id, player_id)

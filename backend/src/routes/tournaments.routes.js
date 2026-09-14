@@ -4,6 +4,7 @@ import multer from 'multer';
 import { query, withTransaction } from '../config/db.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { parsePlayersExcel, upsertTournamentPlayers } from '../services/excelImport.service.js';
+import { normalizeDemoAlias } from '../services/demoAliases.service.js';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
@@ -303,7 +304,7 @@ router.put('/:id/players/:playerId/confirm', requireAdmin, async (req, res) => {
 // весь список ради одной строки неудобно.
 router.put('/:id/players/:playerId', requireAdmin, async (req, res) => {
   try {
-    const { nickname, telegram, faceit_link, seed_rating, hours_cs2 } = req.body;
+    const { nickname, telegram, faceit_link, seed_rating, hours_cs2, demo_aliases } = req.body;
 
     const result = await withTransaction(async (tx) => {
       const { rows: tpRows } = await tx.query(
@@ -311,6 +312,36 @@ router.put('/:id/players/:playerId', requireAdmin, async (req, res) => {
         [req.params.id, req.params.playerId]
       );
       if (tpRows.length === 0) return null;
+
+      let cleanedAliases;
+      if (demo_aliases !== undefined) {
+        const supplied = Array.isArray(demo_aliases) ? demo_aliases : String(demo_aliases).split(/[\n,;]/);
+        const unique = new Map();
+        for (const rawAlias of supplied) {
+          const alias = String(rawAlias || '').normalize('NFKC').trim();
+          if (!alias) continue;
+          if (alias.length > 64) throw Object.assign(new Error('Ник из демо не может быть длиннее 64 символов'), { statusCode: 400 });
+          unique.set(normalizeDemoAlias(alias), alias);
+        }
+        if (unique.size > 20) throw Object.assign(new Error('Для одного игрока можно указать не больше 20 ников из демок'), { statusCode: 400 });
+        unique.delete(normalizeDemoAlias(nickname ?? ''));
+        cleanedAliases = [...unique.values()];
+
+        const { rows: tournamentPlayers } = await tx.query(
+          `SELECT tp.player_id, tp.demo_aliases, p.nickname
+           FROM tournament_players tp
+           JOIN players p ON p.id = tp.player_id
+           WHERE tp.tournament_id = $1 AND tp.player_id <> $2`,
+          [req.params.id, req.params.playerId]
+        );
+        for (const other of tournamentPlayers) {
+          const occupied = [other.nickname, ...(other.demo_aliases || [])].map(normalizeDemoAlias);
+          const collision = cleanedAliases.find((alias) => occupied.includes(normalizeDemoAlias(alias)));
+          if (collision) {
+            throw Object.assign(new Error(`Ник из демо «${collision}» уже принадлежит игроку ${other.nickname}`), { statusCode: 409 });
+          }
+        }
+      }
 
       if (nickname !== undefined || telegram !== undefined || faceit_link !== undefined) {
         if (nickname !== undefined && !String(nickname).trim()) {
@@ -330,10 +361,11 @@ router.put('/:id/players/:playerId', requireAdmin, async (req, res) => {
       const { rows: updatedTp } = await tx.query(
         `UPDATE tournament_players SET
            seed_rating = COALESCE($1, seed_rating),
-           hours_cs2 = COALESCE($2, hours_cs2)
-         WHERE tournament_id = $3 AND player_id = $4
+           hours_cs2 = COALESCE($2, hours_cs2),
+           demo_aliases = COALESCE($3, demo_aliases)
+         WHERE tournament_id = $4 AND player_id = $5
          RETURNING *`,
-        [seed_rating, hours_cs2, req.params.id, req.params.playerId]
+        [seed_rating, hours_cs2, cleanedAliases, req.params.id, req.params.playerId]
       );
 
       const { rows: joined } = await tx.query(
