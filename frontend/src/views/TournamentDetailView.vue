@@ -9,11 +9,13 @@ import MapBadge from '../components/MapBadge.vue';
 import PlayerAvatar from '../components/PlayerAvatar.vue';
 import FaceitLevelBadge from '../components/FaceitLevelBadge.vue';
 import { faceitLevel } from '../lib/faceit';
+import { seriesWinner } from '../lib/bracketSeries';
 
 const route = useRoute();
 const tournament = ref(null);
 const leaderboard = ref([]);
 const draft = ref(null);
+const bracket = ref([]);
 const loading = ref(true);
 let pollTimer = null;
 let disposed = false;
@@ -37,6 +39,32 @@ const draftCurrentTeamName = computed(
   () => draft.value?.teams.find((t) => t.team_id === draft.value.current_team_id)?.team_name
 );
 
+const champion = computed(() => {
+  const finalSlot = bracket.value.find((slot) => slot.round === 'final' && slot.slot_index === 0);
+  const result = seriesWinner(finalSlot);
+  if (!result) return null;
+  const team = tournament.value?.teams.find((item) => item.id === result.teamId);
+  return team ? { ...result, team } : null;
+});
+
+const tournamentMvp = computed(() => {
+  if (!champion.value) return null;
+  const rated = leaderboard.value
+    .filter((player) => player.avg_match_rating != null && Number(player.matches_played) > 0)
+    .sort((a, b) => Number(b.avg_match_rating) - Number(a.avg_match_rating)
+      || Number(b.matches_played) - Number(a.matches_played)
+      || a.nickname.localeCompare(b.nickname));
+  const player = rated[0];
+  if (!player) return null;
+  const team = tournament.value?.teams.find((item) => item.players.some((member) => member.player_id === player.id));
+  return { ...player, team_name: team?.name || null };
+});
+
+const matchesWithDemos = computed(() => (tournament.value?.matches || []).filter((match) => match.demos?.length));
+const demoDownloadUrl = (demo) => apiClient.defaults.baseURL.replace(/\/$/, '') + '/demos/' + demo.id + '/download';
+const fileKind = (name) => String(name || '').toLowerCase().endsWith('.csv') ? 'CSV' : 'DEM';
+const demoStatusLabel = (status) => ({ parsed: 'Готово', parsing: 'Обработка', pending: 'Ожидает', error: 'Ошибка' }[status] || status);
+
 async function load() {
   // loading=true (а значит и весь v-if в шаблоне ниже) выставляем только на
   // самой первой загрузке. Раньше это делалось на каждый вызов load(), а
@@ -47,15 +75,17 @@ async function load() {
   if (!tournament.value) loading.value = true;
 
   try {
-    const [{ data: tData }, { data: lbData }, { data: dData }] = await Promise.all([
+    const [{ data: tData }, { data: lbData }, { data: dData }, { data: bracketData }] = await Promise.all([
       apiClient.get(`/tournaments/${route.params.id}`),
       apiClient.get(`/tournaments/${route.params.id}/leaderboard`),
       apiClient.get(`/tournaments/${route.params.id}/draft`),
+      apiClient.get(`/tournaments/${route.params.id}/bracket`),
     ]);
     if (disposed) return;
     tournament.value = tData.data;
     leaderboard.value = lbData.data;
     draft.value = dData.data;
+    bracket.value = bracketData.data;
     loadError.value = '';
   } catch (err) {
     if (!disposed) loadError.value = 'Не удалось обновить турнир. Повторяем загрузку…';
@@ -94,6 +124,36 @@ onUnmounted(() => {
       <RouterLink :to="`/tournaments/${tournament.id}/groups`" class="btn">Группы</RouterLink>
       <RouterLink :to="`/tournaments/${tournament.id}/bracket`" class="btn">Плей-офф</RouterLink>
     </div>
+
+    <section v-if="champion" class="results-hero" aria-label="Итоги турнира">
+      <div class="champion-panel">
+        <div class="trophy" aria-hidden="true">♛</div>
+        <div class="champion-copy">
+          <p class="result-label">Победитель турнира</p>
+          <h2>{{ champion.team.name }}</h2>
+          <p class="text-muted">Финальная серия {{ champion.wins }}:{{ champion.losses }}</p>
+        </div>
+        <div class="champion-roster" v-if="champion.team.players.length">
+          <span v-for="player in champion.team.players" :key="player.player_id">{{ player.nickname }}</span>
+        </div>
+      </div>
+      <RouterLink v-if="tournamentMvp" :to="`/players/${tournamentMvp.id}`" class="mvp-panel">
+        <div class="mvp-crown" aria-hidden="true">★</div>
+        <div>
+          <p class="result-label">MVP турнира</p>
+          <h3>{{ tournamentMvp.nickname }}</h3>
+          <p v-if="tournamentMvp.team_name" class="text-muted">{{ tournamentMvp.team_name }}</p>
+        </div>
+        <div class="mvp-rating mono">
+          <strong>{{ Number(tournamentMvp.avg_match_rating).toFixed(2) }}</strong>
+          <span>ср. рейтинг</span>
+        </div>
+      </RouterLink>
+      <div v-else class="mvp-panel mvp-panel--empty">
+        <div class="mvp-crown" aria-hidden="true">★</div>
+        <div><p class="result-label">MVP турнира</p><p class="text-muted">Появится после расчёта статистики игроков</p></div>
+      </div>
+    </section>
 
     <RouterLink
       v-if="draft && draft.status === 'active'"
@@ -135,6 +195,30 @@ onUnmounted(() => {
         </RouterLink>
       </div>
       <p v-else class="text-muted">Матчи ещё не назначены.</p>
+
+      <section v-if="matchesWithDemos.length" class="demos-section">
+        <div class="demos-heading">
+          <div><p class="text-muted t-format">Материалы матчей</p><h2>Демо и статистика</h2></div>
+          <span class="demo-count mono">{{ matchesWithDemos.reduce((sum, match) => sum + match.demos.length, 0) }} файлов</span>
+        </div>
+        <div class="demos-list">
+          <article v-for="match in matchesWithDemos" :key="match.id" class="card demo-match">
+            <RouterLink :to="`/matches/${match.id}`" class="demo-match__title">
+              <MapBadge :map="match.map" size="sm" :show-label="false" />
+              <span><strong>{{ match.team_a_name || 'Команда A' }} — {{ match.team_b_name || 'Команда B' }}</strong><small>{{ match.map || 'Карта не указана' }}<template v-if="match.score_a != null"> · {{ match.score_a }}:{{ match.score_b }}</template></small></span>
+              <span aria-hidden="true">→</span>
+            </RouterLink>
+            <div class="demo-files">
+              <a v-for="demo in match.demos" :key="demo.id" :href="demoDownloadUrl(demo)" class="demo-file" download>
+                <span class="demo-file__type mono">{{ fileKind(demo.original_name) }}</span>
+                <span class="demo-file__name">{{ demo.original_name || 'Файл матча' }}</span>
+                <span class="demo-file__meta text-muted">{{ demoStatusLabel(demo.status) }} · {{ new Date(demo.uploaded_at).toLocaleDateString('ru-RU') }}</span>
+                <span class="demo-file__download">↓ Скачать</span>
+              </a>
+            </div>
+          </article>
+        </div>
+      </section>
 
       <h2 class="block-title" style="margin-top: 32px">Команды</h2>
       <div class="teams-grid">
@@ -202,6 +286,66 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.results-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(260px, .9fr);
+  gap: 1px;
+  margin: 4px 0 32px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--gold) 52%, var(--line));
+  border-radius: calc(var(--radius) + 4px);
+  background: color-mix(in srgb, var(--gold) 35%, var(--line));
+  box-shadow: 0 18px 55px rgb(0 0 0 / 35%);
+}
+.results-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle at 16% 0%, color-mix(in srgb, var(--gold) 20%, transparent), transparent 44%);
+}
+.champion-panel, .mvp-panel { position: relative; background: var(--bg-elevated); }
+.champion-panel { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 18px; padding: 28px 30px; }
+.trophy { display: grid; place-items: center; width: 72px; height: 72px; border: 1px solid color-mix(in srgb, var(--gold) 60%, transparent); border-radius: 50%; color: var(--gold); background: color-mix(in srgb, var(--gold) 10%, var(--bg-inset)); font-size: 38px; box-shadow: inset 0 0 25px color-mix(in srgb, var(--gold) 12%, transparent); }
+.result-label { margin-bottom: 5px; color: var(--gold); font-family: var(--font-mono); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.champion-copy h2 { font-size: clamp(25px, 4vw, 40px); line-height: 1.05; margin-bottom: 8px; }
+.champion-roster { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: -6px; }
+.champion-roster span { padding: 4px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-muted); font-size: 11px; }
+.mvp-panel { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 14px; padding: 24px; color: var(--text); text-decoration: none; }
+.mvp-panel:not(.mvp-panel--empty):hover { background: color-mix(in srgb, var(--gold) 6%, var(--bg-elevated)); }
+.mvp-panel h3 { font-size: 22px; margin-bottom: 4px; }
+.mvp-crown { color: var(--gold); font-size: 24px; }
+.mvp-rating { grid-column: 2; display: flex; align-items: baseline; gap: 8px; }
+.mvp-rating strong { color: var(--gold); font-size: 24px; }
+.mvp-rating span { color: var(--text-muted); font-size: 11px; }
+.demos-section { margin-top: 34px; }
+.demos-heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 12px; }
+.demos-heading h2 { font-size: 22px; }
+.demo-count { padding: 5px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-muted); font-size: 11px; }
+.demos-list { display: grid; gap: 12px; }
+.demo-match { overflow: hidden; }
+.demo-match__title { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.demo-match__title:hover strong { color: var(--red-strong); }
+.demo-match__title span:nth-child(2) { display: grid; gap: 3px; min-width: 0; }
+.demo-match__title strong, .demo-file__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.demo-match__title small { color: var(--text-muted); }
+.demo-files { display: grid; }
+.demo-file { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 11px 16px; border-bottom: 1px solid var(--line); color: var(--text); }
+.demo-file:last-child { border-bottom: 0; }
+.demo-file:hover { background: var(--bg-inset); }
+.demo-file__type { width: fit-content; padding: 3px 6px; border: 1px solid color-mix(in srgb, var(--gold) 42%, var(--line)); border-radius: 4px; color: var(--gold); font-size: 10px; }
+.demo-file__meta { font-size: 12px; }
+.demo-file__download { color: var(--gold); font-size: 12px; font-weight: 700; }
+@media (max-width: 760px) {
+  .results-hero { grid-template-columns: 1fr; }
+  .champion-panel { padding: 22px 18px; }
+  .trophy { width: 58px; height: 58px; font-size: 30px; }
+  .demo-file { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .demo-file__meta { display: none; }
+  .demo-file__download { font-size: 0; }
+  .demo-file__download::after { content: '↓'; font-size: 18px; }
+}
 .t-header {
   display: flex;
   justify-content: space-between;

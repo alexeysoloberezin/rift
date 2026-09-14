@@ -950,7 +950,9 @@ async function uploadDemo(matchId, e) {
             {{ m.team_a_name || 'TBD' }} <TeamElo v-if="m.team_a_name" :value="m.team_a_average_elo" /> vs {{ m.team_b_name || 'TBD' }} <TeamElo v-if="m.team_b_name" :value="m.team_b_average_elo" />
           </RouterLink>
           <StatusBadge :status="m.status" />
-          <button class="btn" :disabled="m.status === 'parsing_demo'" @click="editResult(m)">Карта и счёт</button>
+          <button class="btn" :disabled="m.status === 'parsing_demo'" @click="editResult(m)">
+            {{ m.score_a == null ? 'Указать карту и счёт' : `Изменить счёт ${m.score_a}:${m.score_b}` }}
+          </button>
           <form v-if="editingResult === m.id" class="match-team-editor" @submit.prevent="saveResult">
             <label>Карта<input v-model="resultForm.map" placeholder="de_mirage" /></label>
             <label>Счёт {{ m.team_a_name || 'команды A' }}<input v-model="resultForm.score_a" type="number" min="0" max="1000" step="1" /></label>

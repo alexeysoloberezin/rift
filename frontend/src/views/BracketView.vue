@@ -6,6 +6,7 @@ import { VueFlow } from '@vue-flow/core';
 import '@vue-flow/core/dist/style.css';
 import apiClient from '../api/client';
 import StatusBadge from '../components/StatusBadge.vue';
+import { alignedMatchScore, seriesWins } from '../lib/bracketSeries';
 
 // Плей-офф сетка турнира: полуфинал (2 матча) -> финал (1 матч), см.
 // backend/src/routes/bracket.routes.js. Это только визуализация фиксированных
@@ -73,13 +74,6 @@ function isWinner(data, side) {
   return side === 'a' ? wins.a > wins.b : wins.b > wins.a;
 }
 
-function seriesWins(data) {
-  return (data.matches || []).reduce((wins, match) => {
-    if (match.score_a > match.score_b) wins.a++;
-    if (match.score_b > match.score_a) wins.b++;
-    return wins;
-  }, { a: 0, b: 0 });
-}
 </script>
 
 <template>
@@ -123,7 +117,8 @@ function seriesWins(data) {
             <div v-if="data.matches?.length" class="bracket-node__matches">
               <RouterLink v-for="(match, index) in data.matches" :key="match.id" :to="`/matches/${match.id}`" class="bracket-node__link">
                 {{ match.map || `Карта ${index + 1}` }}
-                <span v-if="match.score_a != null" class="mono">{{ match.score_a }}:{{ match.score_b }}</span>
+                <span v-if="alignedMatchScore(data, match)" class="mono">{{ alignedMatchScore(data, match).a }}:{{ alignedMatchScore(data, match).b }}</span>
+                <span v-else-if="match.score_a != null" class="mono" title="Команды матча не совпадают с командами серии">{{ match.score_a }}:{{ match.score_b }} ⚠</span>
                 <StatusBadge :status="match.status" />
               </RouterLink>
             </div>

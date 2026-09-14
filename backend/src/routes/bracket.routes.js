@@ -35,6 +35,7 @@ router.get('/tournaments/:tournamentId/bracket', async (req, res) => {
       `SELECT bs.*, ta.name AS team_a_name, tb.name AS team_b_name, ${teamEloSql('ta')} AS team_a_average_elo, ${teamEloSql('tb')} AS team_b_average_elo,
               COALESCE((SELECT json_agg(json_build_object(
                 'id', m.id, 'status', m.status, 'score_a', m.score_a, 'score_b', m.score_b,
+                'team_a_id', m.team_a_id, 'team_b_id', m.team_b_id,
                 'map', m.map, 'created_at', m.created_at
               ) ORDER BY bsm.created_at, m.created_at)
               FROM bracket_slot_matches bsm JOIN matches m ON m.id = bsm.match_id

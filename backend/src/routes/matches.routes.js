@@ -221,8 +221,8 @@ router.put('/matches/:id/teams', requireAdmin, async (req, res) => {
         WHEN team_id = $2 THEN $4::uuid WHEN team_id = $3 THEN $5::uuid ELSE team_id END WHERE match_id = $1`,
         [match.id, match.team_a_id, match.team_b_id, a, b]);
       const { rows: updated } = await tx.query('UPDATE matches SET team_a_id = $1, team_b_id = $2, teams_manually_set = true WHERE id = $3 RETURNING *', [a, b, match.id]);
-      await tx.query(`UPDATE bracket_slots bs SET team_a_id = $1, team_b_id = $2, updated_at = now()
-        FROM bracket_slot_matches bsm WHERE bsm.slot_id = bs.id AND bsm.match_id = $3`, [a, b, match.id]);
+      // Teams of a playoff series are configured on the bracket slot itself.
+      // Swapping A/B for one demo map must not reorder the whole series.
       return updated[0];
     });
     res.json({ success: true, data: result });

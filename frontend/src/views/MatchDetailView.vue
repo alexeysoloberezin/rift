@@ -12,6 +12,7 @@ const route = useRoute();
 const match = ref(null);
 const loading = ref(true);
 const screenshotUrl = computed(() => match.value?.screenshot_version ? apiClient.defaults.baseURL.replace(/\/$/, '') + '/matches/' + match.value.id + '/screenshot?v=' + encodeURIComponent(match.value.screenshot_version) : null);
+const demoDownloadUrl = (demo) => apiClient.defaults.baseURL.replace(/\/$/, '') + '/demos/' + demo.id + '/download';
 let pollTimer = null;
 
 async function load() {
@@ -116,6 +117,12 @@ function teamNameForSide(side) {
         <StatusBadge :status="match.status" />
       </div>
       <p v-if="parsedDemo?.server_name" class="text-muted server-name">{{ parsedDemo.server_name }}</p>
+    </div>
+
+    <div v-if="match.demos?.length" class="demo-downloads">
+      <a v-for="demo in match.demos" :key="demo.id" :href="demoDownloadUrl(demo)" class="btn demo-download-btn" download>
+        <span aria-hidden="true">↓</span> Скачать {{ demo.original_name || 'демо' }}
+      </a>
     </div>
 
     <div v-if="parseWarnings.length" class="card parse-warnings">
@@ -264,6 +271,8 @@ function teamNameForSide(side) {
 </template>
 
 <style scoped>
+.demo-downloads { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin: -12px 0 28px; }
+.demo-download-btn { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stats-screenshot { display: block; width: 100%; margin: 24px 0; }
 .stats-screenshot img { display: block; width: 100%; height: auto; border-radius: var(--radius); }
 /* Эта страница даёт таблице составов и раундов больше воздуха, чем обычный

@@ -5,6 +5,7 @@ import { useRoute, RouterLink } from 'vue-router';
 import { VueFlow } from '@vue-flow/core';
 import '@vue-flow/core/dist/style.css';
 import apiClient from '../../api/client';
+import { alignedMatchScore } from '../../lib/bracketSeries';
 
 // Админка плей-офф сетки: фиксированная форма "полуфинал (2 матча) -> финал
 // (1 матч)" — см. backend/src/routes/bracket.routes.js. Админ здесь только
@@ -196,7 +197,9 @@ function onNodeClick({ node }) {
         <div v-if="slot.matches?.length" class="linked-match">
           <span class="text-muted">Матчи серии:</span>
           <RouterLink v-for="(match, index) in slot.matches" :key="match.id" :to="`/matches/${match.id}`">
-            Карта {{ index + 1 }} <span v-if="match.score_a != null">({{ match.score_a }}:{{ match.score_b }})</span>
+            Карта {{ index + 1 }}
+            <span v-if="alignedMatchScore(slot, match)">({{ alignedMatchScore(slot, match).a }}:{{ alignedMatchScore(slot, match).b }})</span>
+            <span v-else-if="match.score_a != null" title="Команды матча не совпадают с командами серии">({{ match.score_a }}:{{ match.score_b }} ⚠)</span>
           </RouterLink>
         </div>
         <p v-if="slotError[slot.id]" class="delta-negative">{{ slotError[slot.id] }}</p>

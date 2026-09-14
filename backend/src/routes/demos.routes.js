@@ -13,6 +13,7 @@ const query = deps.query || defaultQuery;
 const withTransaction = deps.withTransaction || defaultTransaction;
 const processDemo = deps.processDemo || defaultProcessDemo;
 const requireAdmin = deps.requireAdmin || defaultRequireAdmin;
+const downloadsDirectory = deps.downloadsDirectory || path.resolve(globalThis.process.env.UPLOADS_DIR || './uploads', 'demos');
 const router = Router();
 
 router.post('/matches/:matchId/demos/detach', requireAdmin, async (req, res) => {
@@ -32,6 +33,25 @@ router.get('/tournaments/:tournamentId/demos', requireAdmin, async (req, res) =>
     res.json({ success: true, data: rows });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/demos/:id/download', async (req, res) => {
+  try {
+    const { rows } = await query('SELECT original_name, storage_path FROM demos WHERE id = $1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ success: false, error: 'Демо не найдено' });
+    const filePath = path.resolve(rows[0].storage_path);
+    const relative = path.relative(downloadsDirectory, filePath);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      return res.status(404).json({ success: false, error: 'Файл демо недоступен' });
+    }
+    const downloadName = path.basename(rows[0].original_name || filePath).replace(/[\r\n"]/g, '_');
+    res.set('Cache-Control', 'private, no-store').set('X-Content-Type-Options', 'nosniff');
+    res.download(filePath, downloadName, (err) => {
+      if (err && !res.headersSent) res.status(err.code === 'ENOENT' ? 404 : 500).json({ success: false, error: 'Файл демо не найден на сервере' });
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: 'Не удалось скачать демо' });
   }
 });
 
