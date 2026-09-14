@@ -96,7 +96,11 @@ router.get('/:id/leaderboard', async (req, res) => {
       `SELECT p.id, p.nickname, p.avatar_url, p.rating, tp.seed_rating,
               COUNT(mps.id)::int AS matches_played,
               ROUND(AVG(mps.match_rating)::numeric, 3) AS avg_match_rating,
-              SUM(mps.elo_change) AS total_elo_change
+              ROUND(AVG(mps.adr)::numeric, 1) AS avg_adr,
+              COALESCE(SUM(mps.kills), 0)::int AS total_kills,
+              COALESCE(SUM(mps.deaths), 0)::int AS total_deaths,
+              COALESCE(SUM(mps.assists), 0)::int AS total_assists,
+              COALESCE(SUM(mps.elo_change), 0) AS total_elo_change
        FROM tournament_players tp
        JOIN players p ON p.id = tp.player_id
        LEFT JOIN match_player_stats mps ON mps.player_id = p.id
@@ -118,6 +122,44 @@ router.get('/:id/leaderboard', async (req, res) => {
 });
 
 // ===================== АДМИНСКИЕ ЭНДПОИНТЫ =====================
+
+// PUT /api/tournaments/:id/mvp — назначить MVP вручную или сбросить выбор.
+router.put('/:id/mvp', requireAdmin, async (req, res) => {
+  try {
+    const playerId = req.body.player_id || null;
+    if (playerId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(playerId)) {
+      return res.status(400).json({ success: false, error: 'Некорректный ID игрока' });
+    }
+
+    const updated = await withTransaction(async (tx) => {
+      const { rows: tournaments } = await tx.query('SELECT id FROM tournaments WHERE id = $1 FOR UPDATE', [req.params.id]);
+      if (!tournaments.length) throw Object.assign(new Error('Турнир не найден'), { statusCode: 404 });
+
+      if (playerId) {
+        const { rows: players } = await tx.query(
+          `SELECT p.nickname
+           FROM tournament_players tp
+           JOIN players p ON p.id = tp.player_id
+           WHERE tp.tournament_id = $1 AND tp.player_id = $2`,
+          [req.params.id, playerId]
+        );
+        if (!players.length) {
+          throw Object.assign(new Error('MVP можно выбрать только из игроков этого турнира'), { statusCode: 400 });
+        }
+      }
+
+      const { rows } = await tx.query(
+        'UPDATE tournaments SET mvp_player_id = $1, updated_at = now() WHERE id = $2 RETURNING *',
+        [playerId, req.params.id]
+      );
+      return rows[0];
+    });
+
+    res.json({ success: true, data: updated });
+  } catch (err) {
+    res.status(err.statusCode || 500).json({ success: false, error: err.message });
+  }
+});
 
 // POST /api/tournaments — создать турнир
 router.post('/', requireAdmin, async (req, res) => {

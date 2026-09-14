@@ -16,6 +16,28 @@ const registeredPlayers = ref([]);
 const groups = ref([]);
 const bracketSlots = ref([]);
 const loading = ref(true);
+const selectedMvpId = ref('');
+const mvpSelectionLoaded = ref(false);
+const savingMvp = ref(false);
+const mvpError = ref('');
+const mvpSaved = ref('');
+
+async function saveMvp() {
+  savingMvp.value = true;
+  mvpError.value = '';
+  mvpSaved.value = '';
+  try {
+    const { data } = await apiClient.put(`/tournaments/${tournamentId}/mvp`, {
+      player_id: selectedMvpId.value || null,
+    });
+    tournament.value = { ...tournament.value, ...data.data };
+    mvpSaved.value = selectedMvpId.value ? 'MVP сохранён' : 'Выбор MVP сброшен';
+  } catch (err) {
+    mvpError.value = err.response?.data?.error || 'Не удалось сохранить MVP';
+  } finally {
+    savingMvp.value = false;
+  }
+}
 
 // Драфт капитанов
 const draft = ref(null);
@@ -357,6 +379,10 @@ async function loadAll() {
     registeredPlayers.value = pData.data;
     groups.value = gData.data;
     bracketSlots.value = bData.data;
+    if (!mvpSelectionLoaded.value) {
+      selectedMvpId.value = tournament.value.mvp_player_id || '';
+      mvpSelectionLoaded.value = true;
+    }
     await Promise.all([loadDraft(), refreshDemos()]);
     loading.value = false;
 
@@ -657,6 +683,27 @@ async function uploadDemo(matchId, e) {
         <StatusBadge :status="tournament.status" />
       </div>
     </div>
+
+    <section class="card block mvp-picker">
+      <div>
+        <p class="admin-kicker">Итоги турнира</p>
+        <h2>MVP турнира</h2>
+        <p class="text-muted hint">Выберите игрока вручную. На главной автоматически покажутся его средний рейтинг, ADR, K/D и число сыгранных карт.</p>
+      </div>
+      <div class="mvp-picker__controls">
+        <select v-model="selectedMvpId" :disabled="savingMvp">
+          <option value="">MVP не выбран</option>
+          <option v-for="player in registeredPlayers" :key="player.player_id" :value="player.player_id">
+            {{ player.nickname }}
+          </option>
+        </select>
+        <button class="btn btn-primary" :disabled="savingMvp" @click="saveMvp">
+          {{ savingMvp ? 'Сохраняем…' : 'Сохранить MVP' }}
+        </button>
+      </div>
+      <p v-if="mvpError" class="delta-negative">{{ mvpError }}</p>
+      <p v-else-if="mvpSaved" class="delta-positive">{{ mvpSaved }}</p>
+    </section>
 
     <section class="card block">
       <h2>Импорт игроков из Excel</h2>
@@ -1340,6 +1387,30 @@ async function uploadDemo(matchId, e) {
   margin-top: 12px;
 }
 
+.mvp-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 420px);
+  align-items: center;
+  gap: 24px;
+  border-color: color-mix(in srgb, var(--gold) 42%, var(--line));
+}
+
+.admin-kicker {
+  margin-bottom: 4px;
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.mvp-picker__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
 .stage-hint {
   margin-top: 16px;
   margin-bottom: 0;
@@ -1381,6 +1452,11 @@ async function uploadDemo(matchId, e) {
    с grid на flex-wrap, чтобы поля сами переносились, а не наезжали друг
    на друга. */
 @media (max-width: 720px) {
+  .mvp-picker,
+  .mvp-picker__controls {
+    grid-template-columns: 1fr;
+  }
+
   .form-grid,
   .form-grid.sheet-source-grid {
     grid-template-columns: 1fr;

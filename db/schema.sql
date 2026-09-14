@@ -43,6 +43,7 @@ CREATE TABLE tournaments (
     start_date   DATE,
     end_date     DATE,
     created_by   UUID REFERENCES admins(id),
+    mvp_player_id UUID REFERENCES players(id) ON DELETE SET NULL,
 
     -- Автосинк списка игроков из живой Google-таблицы (вместо разового
     -- импорта .xlsx) — см. backend/src/services/googleSheets.service.js.

@@ -48,16 +48,15 @@ const champion = computed(() => {
 });
 
 const tournamentMvp = computed(() => {
-  if (!champion.value) return null;
-  const rated = leaderboard.value
-    .filter((player) => player.avg_match_rating != null && Number(player.matches_played) > 0)
-    .sort((a, b) => Number(b.avg_match_rating) - Number(a.avg_match_rating)
-      || Number(b.matches_played) - Number(a.matches_played)
-      || a.nickname.localeCompare(b.nickname));
-  const player = rated[0];
+  const player = leaderboard.value.find((item) => item.id === tournament.value?.mvp_player_id);
   if (!player) return null;
   const team = tournament.value?.teams.find((item) => item.players.some((member) => member.player_id === player.id));
-  return { ...player, team_name: team?.name || null };
+  const deaths = Number(player.total_deaths || 0);
+  return {
+    ...player,
+    team_name: team?.name || null,
+    kd: deaths ? Number(player.total_kills || 0) / deaths : null,
+  };
 });
 
 const matchesWithDemos = computed(() => (tournament.value?.matches || []).filter((match) => match.demos?.length));
@@ -144,14 +143,16 @@ onUnmounted(() => {
           <h3>{{ tournamentMvp.nickname }}</h3>
           <p v-if="tournamentMvp.team_name" class="text-muted">{{ tournamentMvp.team_name }}</p>
         </div>
-        <div class="mvp-rating mono">
-          <strong>{{ Number(tournamentMvp.avg_match_rating).toFixed(2) }}</strong>
-          <span>ср. рейтинг</span>
+        <div class="mvp-stats mono">
+          <div><strong>{{ tournamentMvp.avg_match_rating == null ? '—' : Number(tournamentMvp.avg_match_rating).toFixed(2) }}</strong><span>рейтинг</span></div>
+          <div><strong>{{ tournamentMvp.avg_adr == null ? '—' : Number(tournamentMvp.avg_adr).toFixed(1) }}</strong><span>ADR</span></div>
+          <div><strong>{{ tournamentMvp.kd == null ? '—' : tournamentMvp.kd.toFixed(2) }}</strong><span>K/D</span></div>
+          <div><strong>{{ tournamentMvp.matches_played }}</strong><span>карт</span></div>
         </div>
       </RouterLink>
       <div v-else class="mvp-panel mvp-panel--empty">
         <div class="mvp-crown" aria-hidden="true">★</div>
-        <div><p class="result-label">MVP турнира</p><p class="text-muted">Появится после расчёта статистики игроков</p></div>
+        <div><p class="result-label">MVP турнира</p><p class="text-muted">Организатор ещё не выбрал игрока</p></div>
       </div>
     </section>
 
@@ -316,9 +317,10 @@ onUnmounted(() => {
 .mvp-panel:not(.mvp-panel--empty):hover { background: color-mix(in srgb, var(--gold) 6%, var(--bg-elevated)); }
 .mvp-panel h3 { font-size: 22px; margin-bottom: 4px; }
 .mvp-crown { color: var(--gold); font-size: 24px; }
-.mvp-rating { grid-column: 2; display: flex; align-items: baseline; gap: 8px; }
-.mvp-rating strong { color: var(--gold); font-size: 24px; }
-.mvp-rating span { color: var(--text-muted); font-size: 11px; }
+.mvp-stats { grid-column: 2; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.mvp-stats div { display: grid; gap: 2px; }
+.mvp-stats strong { color: var(--gold); font-size: 20px; }
+.mvp-stats span { color: var(--text-muted); font-size: 10px; text-transform: uppercase; }
 .demos-section { margin-top: 34px; }
 .demos-heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 12px; }
 .demos-heading h2 { font-size: 22px; }
@@ -341,6 +343,7 @@ onUnmounted(() => {
   .results-hero { grid-template-columns: 1fr; }
   .champion-panel { padding: 22px 18px; }
   .trophy { width: 58px; height: 58px; font-size: 30px; }
+  .mvp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .demo-file { grid-template-columns: 40px minmax(0, 1fr) auto; }
   .demo-file__meta { display: none; }
   .demo-file__download { font-size: 0; }
