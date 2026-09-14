@@ -7,6 +7,7 @@ import path from 'node:path';
 import { query as defaultQuery, withTransaction as defaultTransaction } from '../config/db.js';
 import { requireAdmin as defaultRequireAdmin } from '../middleware/auth.js';
 import { processDemo as defaultProcessDemo } from '../services/matchProcessing.service.js';
+import { prepareMatchDemoReprocess } from '../services/reprocessDemo.service.js';
 
 export function createDemosRouter(deps = {}) {
 const query = deps.query || defaultQuery;
@@ -14,7 +15,28 @@ const withTransaction = deps.withTransaction || defaultTransaction;
 const processDemo = deps.processDemo || defaultProcessDemo;
 const requireAdmin = deps.requireAdmin || defaultRequireAdmin;
 const downloadsDirectory = deps.downloadsDirectory || path.resolve(globalThis.process.env.UPLOADS_DIR || './uploads', 'demos');
+const fileExists = deps.fileExists || fs.existsSync;
 const router = Router();
+
+router.post('/matches/:matchId/demo/reprocess', requireAdmin, async (req, res) => {
+  try {
+    const demo = await withTransaction(tx => prepareMatchDemoReprocess(tx, req.params.matchId, { fileExists }));
+    res.status(202).json({
+      success: true,
+      data: { id: demo.id, match_id: demo.match_id, status: demo.status },
+      message: 'Пересчёт статистики запущен',
+    });
+    Promise.resolve().then(() => processDemo(demo.id, demo.match_id, demo.storage_path)).catch(async (err) => {
+      console.error('Ошибка повторной обработки демо:', err.message);
+      await query('UPDATE demos SET status = $1, error_message = $2 WHERE id = $3', ['error', err.message, demo.id]).catch(() => {});
+      await query(`UPDATE matches SET status = CASE
+        WHEN score_manually_set AND score_a IS NOT NULL AND score_b IS NOT NULL THEN 'played'
+        ELSE 'needs_demo' END WHERE id = $1`, [demo.match_id]).catch(() => {});
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ success: false, error: err.message });
+  }
+});
 
 router.post('/matches/:matchId/demos/detach', requireAdmin, async (req, res) => {
   try {

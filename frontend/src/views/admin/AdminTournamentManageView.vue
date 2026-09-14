@@ -291,6 +291,24 @@ async function removeScreenshot(match) {
   finally { screenshotBusy.value = null; }
 }
 const uploadError = ref('');
+const reprocessingMatchId = ref(null);
+const reprocessMessage = ref('');
+
+async function reprocessDemo(match) {
+  reprocessingMatchId.value = match.id;
+  uploadError.value = '';
+  reprocessMessage.value = '';
+  try {
+    await apiClient.post(`/matches/${match.id}/demo/reprocess`);
+    reprocessMessage.value = 'Пересчёт запущен. Статистика обновится автоматически после обработки демки.';
+    await loadAll();
+  } catch (err) {
+    uploadError.value = err.response?.data?.error || 'Не удалось запустить пересчёт статистики';
+  } finally {
+    reprocessingMatchId.value = null;
+  }
+}
+
 const detachingMatchId = ref(null);
 const detachMessage = ref('');
 async function detachDemos(match) {
@@ -1062,6 +1080,14 @@ async function uploadDemo(matchId, e) {
           </label>
           <a v-if="m.screenshot_version" :href="screenshotUrl(m)" target="_blank" rel="noopener" class="btn">Посмотреть скрин</a>
           <button v-if="m.screenshot_version" class="btn" :disabled="screenshotBusy !== null" @click="removeScreenshot(m)">Убрать скрин</button>
+          <button
+            v-if="m.demos?.length"
+            class="btn reprocess-btn"
+            :disabled="reprocessingMatchId !== null || detachingMatchId !== null || uploadingMatchId !== null || m.status === 'parsing_demo'"
+            @click="reprocessDemo(m)"
+          >
+            {{ reprocessingMatchId === m.id ? 'Пересчитываем…' : '↻ Пересчитать статистику' }}
+          </button>
           <button class="btn" :disabled="detachingMatchId !== null || uploadingMatchId !== null || m.status === 'parsing_demo'" @click="detachDemos(m)">{{ detachingMatchId === m.id ? 'Сбрасываем…' : 'Отвязать демо и сбросить стату' }}</button>
           <label class="btn upload-btn">
             {{ uploadingMatchId === m.id ? 'Загрузка…' : 'Загрузить .dem / .csv' }}
@@ -1079,6 +1105,7 @@ async function uploadDemo(matchId, e) {
       </div>
       <p v-if="screenshotError" class="delta-negative" role="alert">{{ screenshotError }}</p>
       <p v-if="detachMessage" class="text-muted" role="status">{{ detachMessage }}</p>
+      <p v-if="reprocessMessage" class="delta-positive" role="status">{{ reprocessMessage }}</p>
       <p v-if="uploadError" class="delta-negative">{{ uploadError }}</p>
       <p v-if="deleteError" class="delta-negative">{{ deleteError }}</p>
       <p v-if="stageError" class="delta-negative">{{ stageError }}</p>
@@ -1466,6 +1493,11 @@ async function uploadDemo(matchId, e) {
 
 .upload-btn {
   cursor: pointer;
+}
+
+.reprocess-btn {
+  border-color: color-mix(in srgb, var(--gold) 48%, var(--line));
+  color: var(--gold);
 }
 
 /* Админка турнира — самая "тяжёлая" по вёрстке страница в проекте (жёсткие
